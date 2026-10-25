@@ -1,7 +1,7 @@
 # 0001: Client access hardening and no external IdPs
 
 Date: 2026-10-25. Status: implemented on branch `claude/reworked-hardening`,
-not released. Base: 0.1.0-rc.1 (`fb4b4a4`), Keycloak 26.7.4.
+planned for 0.1.0-rc.2. Base: 0.1.0-rc.1 (`fb4b4a4`), Keycloak 26.7.4.
 
 User requests (chat, 25.10.2026): configure the group of an application in
 the idp UI; implement a live status check; change the failure handling;
