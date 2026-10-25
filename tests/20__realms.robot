@@ -150,6 +150,29 @@ Alter a missing client
     &{error} =    Run validation    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "nosuchapp1", "enabled": false}
     Should Be Equal    ${error.error}    client_not_found
 
+Restrict a client to a group
+    Run task    module/${ldap_module_id}/add-group    {"group": "g2", "description": "Group Two", "users": []}    decode_json=${FALSE}
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "g1"}    decode_json=${FALSE}
+    &{client} =    Client    ${USER_DOMAIN}    ${FAKE_APP}
+    Should Be Equal    ${client.access_group}    g1
+    Should Be True    ${client.enabled}
+    &{state} =    Run task    module/${module_id}/get-client-access    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "live": true, "user": "u1"}
+    Should Be True    ${state.enforced}
+    Should Be True    ${state.live['ok']}
+    Should Be True    ${state.live['ldap_connection']}
+    Should Be True    ${state.live['group_in_ldap']}
+    Should Be True    ${state.live['user_allowed']}
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "g2"}    decode_json=${FALSE}
+    &{state} =    Run task    module/${module_id}/get-client-access    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "live": true, "user": "u1"}
+    Should Be True    ${state.live['ok']}
+    Should Not Be True    ${state.live['user_allowed']}
+    &{error} =    Run validation    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "nosuchgroup"}
+    Should Be Equal    ${error.error}    group_not_found
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": null}    decode_json=${FALSE}
+    &{client} =    Client    ${USER_DOMAIN}    ${FAKE_APP}
+    Should Be Equal    ${client.access_group}    ${NONE}
+    [Teardown]    Run task    module/${ldap_module_id}/remove-group    {"group": "g2"}    decode_json=${FALSE}
+
 Disable and enable the realm
     Run task    module/${module_id}/alter-realm    {"domain": "${USER_DOMAIN}", "enabled": false}    decode_json=${FALSE}
     &{realm} =    Realm    ${USER_DOMAIN}

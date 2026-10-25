@@ -10,7 +10,8 @@
 # realm managed by the module. It runs after every Keycloak start, and
 # when such settings change, because events can be lost:
 #
-# - the LDAP federation follows the user domain settings;
+# - the LDAP federation follows the user domain settings, and federated
+#   IdPs of earlier versions are removed;
 # - a module client exists only while the module is bound to the user
 #   domain of the realm;
 # - the SMTP settings follow the node smarthost;
@@ -23,6 +24,7 @@ import sys
 import agent
 import agent.ldapproxy
 import idpaccess
+import idplegacy
 import idprealm
 import kcadmin
 
@@ -57,7 +59,14 @@ with idprealm.realms_lock():
     kc = kcadmin.agent_client()
     for realm in kcadmin.managed_realms(kc):
         if realm in user_domains:
-            idprealm.ensure_federation(kc, realm)
+            try:
+                # Realms of earlier versions may still have federated IdPs
+                idplegacy.remove_federated_idps(kc, realm, idprealm.LDAP_COMPONENT_NAME, idprealm.ensure_federation)
+            except Exception as ex:
+                # Try again at the next start; the other realms and settings
+                # are still applied
+                print(agent.SD_WARNING + f"Cannot remove the federated IdPs of realm {realm}: {ex}", file=sys.stderr)
+                idprealm.ensure_federation(kc, realm)
         else:
             print(agent.SD_WARNING + f"User domain {realm} not found: the LDAP federation of its realm is not updated", file=sys.stderr)
 

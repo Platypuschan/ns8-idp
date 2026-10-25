@@ -10,10 +10,8 @@ The NS8 Keycloak providers implement the checks, and both succeed for
 clients without a policy:
 
 - the "ns8-client-access" required action, enabled in the realm.
-  Keycloak evaluates it whenever an authentication completes: password,
-  SSO cookie and federated IdP logins alike. The realm flows, and so
-  the login mode and the password denial of federated accounts, are not
-  changed;
+  Keycloak evaluates it whenever an authentication completes: password
+  and SSO cookie logins alike. The realm flows are not changed;
 - the "ns8-client-group-token-gate" protocol mapper of each restricted
   client: it refuses token issuance and refresh, for example the
   redemption of an authorization code issued before a group removal.
@@ -23,6 +21,12 @@ the user cache before the check, so the cache of the LDAP federation
 stays enabled for everything else. The policy is stored in client
 attributes, and only administrators set it: a module can read the
 policy of its own client, not change it.
+
+The checks only act on clients with the policy attribute. So the
+required action and the token gate are put in place first, and a single
+client update then sets the attribute: a failure leaves the client
+either unrestricted, as before, or restricted. It never disables the
+client.
 """
 
 import sys
@@ -40,6 +44,17 @@ TOKEN_GATE_NAME = "ns8 access group"
 
 GROUP_MAPPER_TYPE = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
 STORAGE_TYPE = "org.keycloak.storage.UserStorageProvider"
+
+# The checks cover browser logins and the tokens issued to users. Grants
+# that issue tokens without a browser login of the user, or that skip
+# the login form, are switched off by set_policy and reported if they
+# are switched on again.
+GRANT_FLAGS = ("directAccessGrantsEnabled", "implicitFlowEnabled", "serviceAccountsEnabled")
+GRANT_ATTRIBUTES = {
+    "oauth2.device.authorization.grant.enabled": "device_grant_set",
+    "oidc.ciba.grant.enabled": "ciba_grant_set",
+    "standard.token.exchange.enabled": "token_exchange_set",
+}
 
 class PolicyError(ValueError):
     """The policy cannot be applied: the reason is in the error code."""
@@ -86,8 +101,7 @@ def required_action_enabled(kc, realm):
 
 def group_mapper(kc, realm):
     """Return (storage, mapper): the LDAP federation and its group
-    mapper, if it reads the memberships from LDAP only. The federation
-    may be writable, as in realms with federated IdPs. Otherwise raise
+    mapper, if it reads the memberships from LDAP only. Otherwise raise
     PolicyError."""
     storages = [c for c in kc.get(f"/{realm}/components", params={"type": STORAGE_TYPE})
         if c.get("providerId") == "ldap"]
@@ -134,7 +148,8 @@ def restricted(client):
 
 def access_state(kc, realm, client):
     """Return the policy of a client. "enforced" is true only if every
-    part of the policy is in place; "issues" lists the missing parts."""
+    part of the policy is in place; "issues" lists the missing parts.
+    It does not query LDAP: see live_state()."""
     attributes = client.get("attributes") or {}
     if not restricted(client):
         return {"enforced": False, "group": None, "group_path": None, "issues": []}
@@ -156,10 +171,12 @@ def access_state(kc, realm, client):
         issues.append("required_action_disabled")
     if not _token_gates(kc, realm, client):
         issues.append("token_gate_missing")
-    # The checks cover browser logins and user tokens only
-    for flag in ("directAccessGrantsEnabled", "implicitFlowEnabled", "serviceAccountsEnabled"):
+    for flag in GRANT_FLAGS:
         if client.get(flag):
             issues.append(f"{flag}_set")
+    for attribute, issue in GRANT_ATTRIBUTES.items():
+        if attributes.get(attribute) == "true":
+            issues.append(issue)
     overrides = client.get("authenticationFlowBindingOverrides") or {}
     if any(overrides.values()):
         # A private flow of the client could differ from the realm flow,
@@ -169,35 +186,130 @@ def access_state(kc, realm, client):
     return state
 
 def set_policy(kc, realm, client, group):
-    """Restrict a client to the members of an LDAP group, by name. The
-    client is disabled while it changes, because the changes are several
-    REST calls: if one fails, the client stays disabled. Return the
-    policy state."""
+    """Restrict a client to the members of an LDAP group, by name, and
+    return the policy state. Every check that can fail runs before the
+    first change. The client keeps its enabled flag: the policy is set
+    by a single client update, after the parts that enforce it."""
+    if client.get("protocol", "openid-connect") != "openid-connect":
+        raise PolicyError("protocol_not_supported")
     if not action_installed(kc, realm):
         raise PolicyError("provider_not_installed")
     group_rep = find_group(kc, realm, group)
-    was_enabled = client.get("enabled", True)
-    if was_enabled:
-        client["enabled"] = False
-        kc.put(f"/{realm}/clients/{client['id']}", client)
+    # Without the policy attribute both checks allow every user: put them
+    # in place first
     ensure_required_action(kc, realm)
+    _ensure_token_gate(kc, realm, client)
+    client = kc.get(f"/{realm}/clients/{client['id']}")
     client.setdefault("attributes", {}).update({
         POLICY: POLICY_GROUP,
         GROUP_ID: group_rep["id"],
         GROUP_PATH: group_rep["path"],
     })
-    client.update({"directAccessGrantsEnabled": False, "implicitFlowEnabled": False,
-        "serviceAccountsEnabled": False})
+    client["attributes"].update({attribute: "false" for attribute in GRANT_ATTRIBUTES})
+    client.update({flag: False for flag in GRANT_FLAGS})
     kc.put(f"/{realm}/clients/{client['id']}", client)
-    _ensure_token_gate(kc, realm, client)
-    client = kc.get(f"/{realm}/clients/{client['id']}")
-    state = access_state(kc, realm, client)
+    state = access_state(kc, realm, kc.get(f"/{realm}/clients/{client['id']}"))
     if not state["enforced"]:
-        print(f"Access policy of client {client['clientId']} is incomplete: {state['issues']}. The client stays disabled", file=sys.stderr)
+        # For example a concurrent change in the Keycloak console. The
+        # client is restricted anyway: the required action denies the
+        # logins of non-members
+        print(f"Access policy of client {client['clientId']} is incomplete: {state['issues']}", file=sys.stderr)
         raise PolicyError("policy_incomplete")
-    if was_enabled:
-        client["enabled"] = True
-        kc.put(f"/{realm}/clients/{client['id']}", client)
+    return state
+
+#
+# Live checks
+#
+
+# The masked value of a stored secret: Keycloak tests the connection
+# with the bind password of the federation
+MASKED_SECRET = "**********"
+
+def _status(ex):
+    return getattr(ex, "status", None)
+
+def _ldap_connection(kc, realm):
+    """Bind to LDAP with the stored settings of the federation. Return
+    None on success, or an issue."""
+    storages = [c for c in kc.get(f"/{realm}/components", params={"type": STORAGE_TYPE})
+        if c.get("providerId") == "ldap"]
+    if len(storages) != 1:
+        return "ldap_federation_not_found"
+    config = storages[0].get("config", {})
+    first = lambda name, default="": (config.get(name) or [default])[0]
+    try:
+        kc.post(f"/{realm}/testLDAPConnection", {
+            "action": "testAuthentication",
+            "componentId": storages[0]["id"],
+            "connectionUrl": first("connectionUrl"),
+            "authType": first("authType", "simple"),
+            "bindDn": first("bindDn"),
+            "bindCredential": MASKED_SECRET,
+            "useTruststoreSpi": first("useTruststoreSpi", "always"),
+            "connectionTimeout": first("connectionTimeout"),
+            "startTls": first("startTls", "false"),
+        })
+    except Exception as ex:
+        print(f"LDAP connection test of realm {realm} failed: {ex}", file=sys.stderr)
+        return "ldap_connection_failed"
+    return None
+
+def find_user(kc, realm, username):
+    users = kc.get(f"/{realm}/users", params={"username": username, "exact": "true"})
+    return next((u for u in users if u["username"].lower() == username.lower()), None)
+
+def user_allowed(kc, realm, client, user):
+    """Run the token gate of the client for a user, as at token
+    issuance, without signing in: Keycloak builds an example access
+    token. Return True or False, or raise the request error."""
+    try:
+        kc.get(f"/{realm}/clients/{client['id']}/evaluate-scopes/generate-example-access-token",
+            params={"scope": "openid", "userId": user["id"]})
+    except Exception as ex:
+        if _status(ex) == 403 and "access_denied" in (getattr(ex, "body", "") or ""):
+            return False
+        raise
+    return True
+
+def live_state(kc, realm, client, group_exists, username=None):
+    """Check the parts of a policy that access_state() cannot see:
+    LDAP is reachable, the group still exists in LDAP, and optionally
+    one user can sign in now. group_exists(name) looks the group up in
+    the user domain. "ok" is true only if no issue is found: a user that
+    is not allowed is a result, not an issue."""
+    issues = []
+    state = {"ldap_connection": None, "group_in_ldap": None, "user_allowed": None, "issues": issues}
+    issue = _ldap_connection(kc, realm)
+    state["ldap_connection"] = issue is None
+    if issue:
+        issues.append(issue)
+    if restricted(client):
+        attributes = client.get("attributes") or {}
+        name = (attributes.get(GROUP_PATH) or "").rsplit("/", 1)[-1]
+        try:
+            group = kc.get(f"/{realm}/groups/{_path(attributes.get(GROUP_ID) or '-')}")
+            name = group["name"]
+        except Exception:
+            pass
+        if name and state["ldap_connection"]:
+            try:
+                state["group_in_ldap"] = bool(group_exists(name))
+            except Exception as ex:
+                print(f"LDAP lookup of group {name} failed: {ex}", file=sys.stderr)
+                issues.append("group_lookup_failed")
+            if state["group_in_ldap"] is False:
+                issues.append("group_not_in_ldap")
+    if username:
+        user = find_user(kc, realm, username)
+        if user is None:
+            issues.append("user_not_found")
+        else:
+            try:
+                state["user_allowed"] = user_allowed(kc, realm, client, user)
+            except Exception as ex:
+                print(f"Token check of user {username} failed: {ex}", file=sys.stderr)
+                issues.append("user_check_failed")
+    state["ok"] = not issues
     return state
 
 def clear_policy(kc, realm, client):

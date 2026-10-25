@@ -33,27 +33,31 @@ python3 tests/client-access/check_failures.py
 
 `run.py` covers allowed/denied and unrestricted clients, cached membership
 revocation/regrant, SSO-cookie reuse, code/refresh denial, LDAP failure,
-restart, writable LDAP and a broker realm, policy removal/reapplication,
-reconciliation and client deletion/re-registration, plus real token lifespan.
-`check_failures.py` covers preflight versus mid-update failures, grant-flag
-diagnostics, token default/reset, local-only accounts and direct/nested/deleted
-groups. The broker is a second Keycloak realm, not a live Entra ID tenant.
+restart, policy removal/reapplication, reconciliation and client
+deletion/re-registration, real token lifespan, the removal of federated
+IdPs of 0.1.0-rc.1 realms, SAML logins (SP- and IdP-initiated, with an SSO
+cookie), and the device grant and standard token exchange switched on again
+in the console. `check_failures.py` covers failures at each step of a policy
+change (the client is never disabled), grant-flag diagnostics, token
+default/reset, local-only accounts, direct/nested/deleted groups and the
+live status check against real Keycloak and Samba AD.
 
 The required action relies on Keycloak's trigger evaluation at completed
-authentication, and the LDAP failure check uses
-`StorageUnavailableUserModelDelegate` (not a stable public API). Revalidate
-these paths on Keycloak updates. The current compile target is inherited
-from upstream (26.7.5), while the runtime image is upstream's 26.7.4.
+authentication, the LDAP failure check uses
+`StorageUnavailableUserModelDelegate` (not a stable public API), and the
+live user check uses the admin example-token endpoint. Revalidate these
+paths on Keycloak updates. The current compile target is inherited from
+upstream (26.7.5), while the runtime image is upstream's 26.7.4.
+
+Decisions: [ADR 0001](decisions/0001-client-access-hardening.md).
 
 ## Remaining before general release
 
 - Decide whether client authorization belongs here or in applications, and
   review the LDAP workload caused by targeted eviction.
-- Add a policy field/error translations to the realm/client UI.
 - Validate upgrade, backup/restore, complete existing NS8 realm/federation
-  suites, alternative LDAP schemas, future MFA and grant compatibility.
-- Run the upstream NS8/QEMU suite on the integrated module; the older
-  Vaultwarden QEMU run covers the overlay prototype, not this new patch.
+  suites, alternative LDAP schemas and future MFA compatibility.
+- The Access page was built and linted, not tried in a browser on NS8.
 
-No production deployment, live Entra, physical mobile app or complete
-feature/upgrade compatibility is claimed by this draft.
+No production deployment, physical mobile app or complete feature/upgrade
+compatibility is claimed.

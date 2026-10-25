@@ -34,25 +34,37 @@ class DraftEvidence(LoginTests):
             'redirect_uri':self.vw_url+'/identity/connect/oidc-signin',
             'code_verifier':verifier}, timeout=20)
 
-    def test_17_preflight_vs_mid_update_failure(self):
+    def test_17_failures_never_disable_the_client(self):
         client=self.new_client('review-failure')
         with self.assertRaises(idpaccess.PolicyError):
             idpaccess.set_policy(self.kc,'ad.test',copy.deepcopy(client),'missing-review-group')
         after=self.kc.find_client('ad.test','review-failure')
         self.assertTrue(after['enabled'])
         self.assertFalse(idpaccess.restricted(after))
-        # Fail the real policy procedure after it has disabled the real client.
-        with patch.object(idpaccess,'_ensure_token_gate',side_effect=RuntimeError('injected mapper write failure')):
-            with self.assertRaisesRegex(RuntimeError,'injected'):
-                idpaccess.set_policy(self.kc,'ad.test',after,'services_vaultwarden')
-        failed=self.kc.find_client('ad.test','review-failure')
-        self.assertFalse(failed['enabled'])
-        self.assertTrue(idpaccess.restricted(failed))
-        self.assertIn('token_gate_missing',idpaccess.access_state(self.kc,'ad.test',failed)['issues'])
-        idpaccess.reconcile(self.kc,'ad.test',[failed])
-        repaired=self.kc.find_client('ad.test','review-failure')
-        self.assertFalse(repaired['enabled'])
-        self.assertTrue(idpaccess.access_state(self.kc,'ad.test',repaired)['enforced'])
+        # Fail each change of the real policy procedure: the token gate, and
+        # the client update that sets the policy
+        put=self.kc.put
+        def failing_put(path,data=None):
+            if path.endswith('/clients/'+after['id']):
+                raise RuntimeError('injected client update failure')
+            return put(path,data)
+        for label,patcher in [('token gate',patch.object(idpaccess,'_ensure_token_gate',side_effect=RuntimeError('injected mapper write failure'))),
+                ('client update',patch.object(self.kc,'put',side_effect=failing_put))]:
+            with self.subTest(label), patcher, self.assertRaisesRegex(RuntimeError,'injected'):
+                idpaccess.set_policy(self.kc,'ad.test',copy.deepcopy(after),'services_vaultwarden')
+            failed=self.kc.find_client('ad.test','review-failure')
+            self.assertTrue(failed['enabled'],label)
+            self.assertFalse(idpaccess.restricted(failed),label)
+        # The client stays usable, as before the failed change
+        _,_,target,_=self.auth('denied',client='review-failure')
+        self.assertIn('code=',target or '')
+        # Trying again completes the policy
+        state=idpaccess.set_policy(self.kc,'ad.test',self.kc.find_client('ad.test','review-failure'),'services_vaultwarden')
+        self.assertTrue(state['enforced'],state)
+        self.assertTrue(self.kc.find_client('ad.test','review-failure')['enabled'])
+        _,response,target,_=self.auth('denied',client='review-failure')
+        self.assertIsNone(target)
+        self.assertEqual(response.status_code,403)
 
     def test_18_grants_detected_and_registration_resets(self):
         client=self.new_client('review-grants')
@@ -123,22 +135,73 @@ class DraftEvidence(LoginTests):
         self.assertIsNone(target)
         self.assertEqual(response.status_code,403)
         # Run the actual get-client-access action against the real Keycloak.
-        # Only NS8 caller identity/transport plumbing is substituted.
+        # Only NS8 caller identity/transport plumbing is substituted; the
+        # LDAP group lookup asks the real Samba AD.
+        state=self.run_get_client_access({'domain':'ad.test'},'module/review-group')
+        # The structural check cannot see the deletion
+        self.assertTrue(state['enforced'],state)
+        self.assertEqual(state['issues'],[])
+        self.assertNotIn('live',state)
+        state=self.run_get_client_access({'domain':'ad.test','live':True},'module/review-group')
+        self.assertTrue(state['enforced'],state)
+        self.assertEqual(state['live'],{'ok':False,'ldap_connection':True,'group_in_ldap':False,
+            'user_allowed':None,'issues':['group_not_in_ldap']})
+        print('LDAP-deleted group: login denied, enforced=true, live reports group_not_in_ldap',flush=True)
+
+    def run_get_client_access(self, request, caller):
         kcadmin=types.ModuleType('kcadmin')
         kcadmin.agent_client=lambda:self.kc
         kcadmin.managed_realms=lambda kc:['ad.test']
+        ldapproxy=types.ModuleType('agent.ldapproxy')
+        ldapproxy.Ldapproxy=lambda:types.SimpleNamespace(get_domain=lambda domain:{'schema':'ad'})
+        ldapclient=types.ModuleType('agent.ldapclient')
+        class NotFound(Exception): pass
+        samba=self.samba
+        class Client:
+            def get_group(self, name):
+                if cmd('podman','exec',samba,'samba-tool','group','show',name,check=False).returncode:
+                    raise NotFound(name)
+                return {'group':name}
+        ldapclient.Ldapclient=types.SimpleNamespace(factory=lambda **kw:Client())
+        ldapclient.LdapclientEntryNotFound=NotFound
         output=io.StringIO()
-        with patch.dict(sys.modules,{'kcadmin':kcadmin}), \
-                patch.dict(os.environ,{'AGENT_TASK_USER':'module/review-group'}), \
+        with patch.dict(sys.modules,{'kcadmin':kcadmin,'agent.ldapproxy':ldapproxy,'agent.ldapclient':ldapclient}), \
+                patch.object(sys.modules['agent'],'ldapproxy',ldapproxy,create=True), \
+                patch.dict(os.environ,{'AGENT_TASK_USER':caller}), \
                 patch.object(idprealm,'require_keycloak',return_value=None), \
-                patch.object(sys,'stdin',io.StringIO('{"domain":"ad.test"}')), \
+                patch.object(sys,'stdin',io.StringIO(json.dumps(request))), \
                 contextlib.redirect_stdout(output):
             runpy.run_path(str(ROOT/'imageroot/actions/get-client-access/20read'),run_name='__main__')
-        state=json.loads(output.getvalue())
-        # Report what the administrative health check says after real LDAP deletion.
+        return json.loads(output.getvalue())
+
+    def test_23_live_state_with_real_services(self):
+        state=self.run_get_client_access({'domain':'ad.test','client_id':'vaultwarden1','live':True,'user':'allowed'},'admin')
         self.assertTrue(state['enforced'],state)
-        self.assertEqual(state['issues'],[])
-        print('LDAP-deleted group: login denied, structural access_state remains enforced=true',flush=True)
+        self.assertEqual(state['live'],{'ok':True,'ldap_connection':True,'group_in_ldap':True,'user_allowed':True,'issues':[]})
+        user=idpaccess.find_user(self.kc,'ad.test','denied')
+        sessions=lambda:sorted(x['id'] for x in self.kc.get('/ad.test/users/'+user['id']+'/sessions'))
+        before=sessions()
+        state=self.run_get_client_access({'domain':'ad.test','client_id':'vaultwarden1','live':True,'user':'denied'},'admin')
+        self.assertTrue(state['live']['ok'],state)
+        self.assertIs(state['live']['user_allowed'],False)
+        # The example token check leaves no user session behind
+        self.assertEqual(sessions(),before)
+        # A user removed from the group is reported at once, with the cache on
+        cmd('podman','exec',self.samba,'samba-tool','group','removemembers','services_vaultwarden','allowed')
+        try:
+            state=self.run_get_client_access({'domain':'ad.test','client_id':'vaultwarden1','live':True,'user':'allowed'},'admin')
+            self.assertIs(state['live']['user_allowed'],False)
+        finally:
+            cmd('podman','exec',self.samba,'samba-tool','group','addmembers','services_vaultwarden','allowed')
+        cmd('podman','pause',self.samba)
+        try:
+            state=self.run_get_client_access({'domain':'ad.test','client_id':'vaultwarden1','live':True},'admin')
+        finally:
+            cmd('podman','unpause',self.samba)
+        self.assertFalse(state['live']['ok'])
+        self.assertFalse(state['live']['ldap_connection'])
+        self.assertIsNone(state['live']['group_in_ldap'])
+        self.assertEqual(state['live']['issues'],['ldap_connection_failed'])
 
 
 if __name__=='__main__':

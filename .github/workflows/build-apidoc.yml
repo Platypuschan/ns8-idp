@@ -9,4 +9,8 @@ on:
 
 jobs:
   build-apidoc:
+    # The called workflow pushes the docs to the apidoc-<ref> branch; the
+    # repository default token is read-only
+    permissions:
+      contents: write
     uses: NethServer/ns8-github-actions/.github/workflows/build-apidoc.yml@v1

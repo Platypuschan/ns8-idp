@@ -9,6 +9,8 @@ import json
 import os
 import sys
 
+import agent.ldapproxy
+from agent.ldapclient import Ldapclient, LdapclientEntryNotFound
 import idpaccess
 import idprealm
 import kcadmin
@@ -16,19 +18,22 @@ import kcadmin
 request = json.load(sys.stdin)
 domain = request["domain"]
 
-# A module reads the policy of its own client only. Administrators, with
-# tasks without a calling user, pass client_id.
+# A module reads the policy of its own client only. Administrators, for
+# example from the UI or with api-cli, pass client_id.
 task_user = os.getenv("AGENT_TASK_USER", "")
-if task_user:
+if task_user.startswith("module/"):
     if "client_id" in request:
         idprealm.fail_validation("client_id", request["client_id"], "client_id_not_allowed")
-    if not task_user.startswith("module/"):
-        idprealm.fail_validation("client_id", task_user, "caller_not_a_module")
+    if "user" in request:
+        # Memberships of other users are not disclosed to modules
+        idprealm.fail_validation("user", request["user"], "user_not_allowed")
     client_id = task_user.removeprefix("module/")
 elif "client_id" in request:
     client_id = request["client_id"]
 else:
     idprealm.fail_validation("client_id", "", "client_id_required")
+if "user" in request and not request.get("live"):
+    idprealm.fail_validation("user", request["user"], "user_requires_live")
 
 idprealm.require_keycloak()
 kc = kcadmin.agent_client()
@@ -40,4 +45,15 @@ if client is None:
 
 state = idpaccess.access_state(kc, domain, client)
 state["enabled"] = client.get("enabled", True)
+
+if request.get("live"):
+    def group_exists(name):
+        ldom = agent.ldapproxy.Ldapproxy().get_domain(domain)
+        try:
+            Ldapclient.factory(**ldom).get_group(name)
+        except LdapclientEntryNotFound:
+            return False
+        return True
+    state["live"] = idpaccess.live_state(kc, domain, client, group_exists, request.get("user"))
+
 json.dump(state, fp=sys.stdout)

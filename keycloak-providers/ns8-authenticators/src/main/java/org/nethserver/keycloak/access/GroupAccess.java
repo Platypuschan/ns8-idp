@@ -54,8 +54,7 @@ public final class GroupAccess {
     }
 
     /** The memberships come from LDAP only if the user is federated by an
-     * LDAP provider with a read-only group mapper. The provider itself may
-     * be writable, as in realms with federated IdPs. */
+     * LDAP provider with a read-only group mapper. */
     private static boolean liveMembership(RealmModel realm, UserModel user) {
         var link = user.getFederationLink();
         ComponentModel federation = link == null ? null : realm.getComponent(link);

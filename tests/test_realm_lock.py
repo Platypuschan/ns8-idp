@@ -58,6 +58,9 @@ def action_worker(script, lockfile, pipe):
     policy=types.ModuleType('idpaccess')
     policy.reconcile=lambda *a:None
     sys.modules['idpaccess']=policy
+    legacy=types.ModuleType('idplegacy')
+    legacy.remove_federated_idps=lambda *a:None
+    sys.modules['idplegacy']=legacy
     sys.stdin=io.StringIO(json.dumps({'domain':'ad.test','client_id':'review1','enabled':False}))
     pipe.send('started')
     try:
