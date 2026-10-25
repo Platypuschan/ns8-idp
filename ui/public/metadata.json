@@ -1,10 +1,13 @@
 {
-  "name": "Identity Provider (alpha)",
+  "name": "Identity Provider Reworked (preview)",
   "description": {
-    "it": "Single sign-on e identità federata per le applicazioni NethServer 8, basata su Keycloak",
+    "it": "Single sign-on e identit\u00e0 federata per le applicazioni NethServer 8, basata su Keycloak",
     "en": "Single sign-on and identity federation for NethServer 8 applications, based on Keycloak"
   },
-  "categories": ["core", "collaboration"],
+  "categories": [
+    "core",
+    "collaboration"
+  ],
   "authors": [
     {
       "name": "NethServer team",
@@ -12,9 +15,9 @@
     }
   ],
   "docs": {
-    "documentation_url": "https://docs.nethserver.org/docs/administrator-manual/applications/idp",
-    "bug_url": "https://github.com/NethServer/dev",
-    "code_url": "https://github.com/NethServer/ns8-idp"
+    "documentation_url": "https://github.com/Platypuschan/ns8-idp-reworked/blob/main/README.md",
+    "bug_url": "https://github.com/Platypuschan/ns8-idp-reworked/issues",
+    "code_url": "https://github.com/Platypuschan/ns8-idp-reworked"
   },
-  "source": "ghcr.io/nethserver/idp"
+  "source": "ghcr.io/platypuschan/idp-reworked"
 }

@@ -23,7 +23,7 @@ Services are active
     Should Be Equal As Integers    ${rc}    0
 
 Keycloak runs the module image
-    ${expected} =    Execute Command    runagent -m ${module_id} printenv IDP_KEYCLOAK_IMAGE
+    ${expected} =    Execute Command    runagent -m ${module_id} printenv IDP_REWORKED_KEYCLOAK_IMAGE
     ${running} =    Execute Command    runagent -m ${module_id} podman inspect --format {{.ImageName}} keycloak
     Should Not Be Empty    ${expected}
     Should Be Equal    ${running}    ${expected}

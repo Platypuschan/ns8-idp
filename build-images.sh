@@ -11,9 +11,9 @@ set -e
 # Prepare variables for later use
 images=()
 # The image will be pushed to GitHub container registry
-repobase="${REPOBASE:-ghcr.io/nethserver}"
+repobase="${REPOBASE:-ghcr.io/platypuschan}"
 # Configure the image name
-reponame="idp"
+reponame="idp-reworked"
 
 # Create a new empty container image
 container=$(buildah from scratch)
@@ -35,19 +35,20 @@ buildah run \
 echo "Building the Keycloak image..."
 buildah build --force-rm --layers --jobs=0 \
     --file keycloak-providers/Containerfile \
-    --tag "${repobase}/idp-keycloak" \
+    --tag "${repobase}/idp-reworked-keycloak" \
     keycloak-providers
-images+=("${repobase}/idp-keycloak")
+images+=("${repobase}/idp-reworked-keycloak")
 
 # Add imageroot directory to the container image
 buildah add "${container}" imageroot /imageroot
 buildah add "${container}" ui/dist /ui
 # Setup the entrypoint, ask to reserve one TCP port with the label and set a rootless container
 buildah config --entrypoint=/ \
+    --label="org.opencontainers.image.source=https://github.com/Platypuschan/ns8-idp-reworked" \
     --label="org.nethserver.authorizations=traefik@node:routeadm samba@any:domadm openldap@any:domadm cluster:accountconsumer" \
     --label="org.nethserver.tcp-ports-demand=1" \
     --label="org.nethserver.rootfull=0" \
-    --label="org.nethserver.images=${repobase}/idp-keycloak:${IMAGETAG:-latest} docker.io/library/postgres:18.6-trixie" \
+    --label="org.nethserver.images=${repobase}/idp-reworked-keycloak:${IMAGETAG:-latest} docker.io/library/postgres:18.6-trixie" \
     "${container}"
 # Commit the image
 buildah commit "${container}" "${repobase}/${reponame}"

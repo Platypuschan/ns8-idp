@@ -1,4 +1,8 @@
-# ns8-idp
+# ns8-idp-reworked
+
+Vorbereitung der Vorabversion **0.1.0-rc.1**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel und Tokenlaufzeit; kein Stable-/Katalogrelease.
+
+[Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
 Single sign-on and identity federation for NethServer 8 applications, based on Keycloak
 
@@ -6,19 +10,19 @@ Single sign-on and identity federation for NethServer 8 applications, based on K
 
 Install the module (application) on cluster node 1:
 
-    add-module ghcr.io/nethserver/idp:1.0.0 1
+    add-module ghcr.io/platypuschan/idp-reworked:0.1.0-rc.1 1
 
 The output of the command will return the module identifier:
 Output example:
 
-    {"module_id": "idp1", "image_name": "idp", "image_url": "ghcr.io/nethserver/idp:1.0.0"}
+    {"module_id": "idp1", "image_name": "idp", "image_url": "ghcr.io/platypuschan/idp-reworked:0.1.0-rc.1"}
 
 ## Configure
 
 Set the host name of the identity provider, and optionally request a
 Let's Encrypt certificate for it:
 
-    api-cli run module/idp1/configure-module --data '{"host": "sso.example.org", "lets_encrypt": true}'
+    api-cli run module/idp-reworked1/configure-module --data '{"host": "sso.example.org", "lets_encrypt": true}'
 
 The whole host name is routed to Keycloak. The action fails if the host
 name is already used by another application, or if the Let's Encrypt
@@ -27,7 +31,7 @@ is kept.
 
 Read the current configuration:
 
-    api-cli run module/idp1/get-configuration
+    api-cli run module/idp-reworked1/get-configuration
 
 ## Register an application
 
@@ -35,13 +39,13 @@ An application module registers its OIDC client in the realm of its
 user domain with the `register-client` action. The module image must
 declare the `clientadm` role in its authorizations label:
 
-    org.nethserver.authorizations=idp@any:clientadm
+    org.nethserver.authorizations=idp-reworked@any:clientadm
 
 The client ID is the module ID. For example, the module agent of
 `nextcloud1`, bound to the `dp.example.org` user domain, calls:
 
 ```python
-response = agent.tasks.run(agent_id="module/idp1", action="register-client", data={
+response = agent.tasks.run(agent_id="module/idp-reworked1", action="register-client", data={
     "domain": "dp.example.org",
     "redirect_uris": ["https://cloud.example.org/apps/user_oidc/code"],
     "post_logout_redirect_uris": ["https://cloud.example.org/"],
@@ -82,7 +86,7 @@ provider module:
 {
     "host": "sso.example.org",
     "issuer_url_prefix": "https://sso.example.org/realms/",
-    "key": "module/idp1/srv/http/oidc",
+    "key": "module/idp-reworked1/srv/http/oidc",
     "module_id": "idp1",
     "module_uuid": "8d257122-0a7f-49c7-a620-08961a68cfa0"
 }
@@ -97,7 +101,7 @@ An administrator can restrict an NS8 module's OIDC client to the **direct**
 members of one LDAP group in its user domain:
 
 ```sh
-api-cli run module/idp1/alter-realm-client --data '{"domain":"ad.example.org","client_id":"vaultwarden1","access_group":"services_vaultwarden"}'
+api-cli run module/idp-reworked1/alter-realm-client --data '{"domain":"ad.example.org","client_id":"vaultwarden1","access_group":"services_vaultwarden"}'
 ```
 
 Omitting `access_group` preserves the policy; `null` removes it. Client
@@ -123,7 +127,7 @@ expiry rules; this does not revoke an offline application session or vault.
 A module with the `clientadm` role can read only its own policy:
 
 ```python
-response = agent.tasks.run(agent_id="module/idp1", action="get-client-access",
+response = agent.tasks.run(agent_id="module/idp-reworked1", action="get-client-access",
     data={"domain": "ad.example.org"})
 ```
 
@@ -169,7 +173,7 @@ In the Entra admin center, register an application with the redirect
 URI of the realm, a client secret, and the optional ID token claims
 `email`, `given_name` and `family_name`. Then add the IdP:
 
-    api-cli run module/idp1/add-federated-idp --data '{"domain": "ad.example.org", "type": "entra", "entra": {"tenant_id": "...", "client_id": "...", "client_secret": "..."}}'
+    api-cli run module/idp-reworked1/add-federated-idp --data '{"domain": "ad.example.org", "type": "entra", "entra": {"tenant_id": "...", "client_id": "...", "client_secret": "..."}}'
 
 The output contains the redirect URI of the realm, also listed by
 `list-realms`:
@@ -193,7 +197,7 @@ A realm with a federated IdP has a login mode, set with `alter-realm`:
   federated, its IdP cannot be disabled or removed, and no other IdP can
   be added or enabled. Switch it back to `mixed` first.
 
-      api-cli run module/idp1/alter-realm --data '{"domain": "ad.example.org", "login_mode": "federated"}'
+      api-cli run module/idp-reworked1/alter-realm --data '{"domain": "ad.example.org", "login_mode": "federated"}'
 
   The output reports how many enabled native accounts, without the
   federated account marker, lose their SSO logins:

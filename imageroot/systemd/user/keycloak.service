@@ -35,7 +35,7 @@ ExecStart=/usr/bin/podman run \
     --replace --name=%N \
     --env-file=%E/etc/keycloak.env \
     --env-file=./passwords.env \
-    ${IDP_KEYCLOAK_IMAGE} \
+    ${IDP_REWORKED_KEYCLOAK_IMAGE} \
         start --optimized \
         --hostname=https://${IDP_HOSTNAME}
 ExecStartPost=-runagent keycloak-post-start

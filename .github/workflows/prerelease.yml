@@ -1,0 +1,94 @@
+name: Prepare prerelease
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: prerelease
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.images.outputs.image }}
+      runtime: ${{ steps.images.outputs.runtime }}
+      candidate: ${{ steps.images.outputs.candidate }}
+      version: ${{ steps.images.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests jsonschema
+      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - run: sudo apt-get update && sudo apt-get install -y podman skopeo
+      - name: Build isolated candidate images
+        id: images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          version="$(cat VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]] || exit 64
+          base="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          tag="candidate-${GITHUB_SHA:0:12}"
+          printf '%s' "$GH_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman build --layers -t "$base/idp-reworked-keycloak:$tag" -f keycloak-providers/Containerfile keycloak-providers
+          podman push "$base/idp-reworked-keycloak:$tag"
+          digest="$(skopeo inspect "docker://$base/idp-reworked-keycloak:$tag" --format '{{.Digest}}')"
+          [[ "$digest" == sha256:* ]] || exit 65
+          podman build --layers -t "$base/idp-reworked:$tag" --build-arg "KEYCLOAK_IMAGE=$base/idp-reworked-keycloak@$digest" -f Containerfile .
+          podman push "$base/idp-reworked:$tag"
+          printf 'image=%s/idp-reworked:%s\nruntime=%s/idp-reworked-keycloak\ncandidate=%s\nversion=%s\n' "$base" "$tag" "$base" "$tag" "$version" >> "$GITHUB_OUTPUT"
+  qemu:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian13, rocky9]
+    permissions:
+      contents: read
+      statuses: write
+    uses: NethServer/ns8-github-actions/.github/workflows/test-on-qemu.yml@v1
+    with:
+      distro: ${{ matrix.distro }}
+      image_url: ${{ needs.build.outputs.image }}
+      repo_ref: ${{ github.sha }}
+      version_tag: ${{ needs.build.outputs.candidate }}
+      install_args: ghcr.io/nethserver/core:3.23.2
+      script: ""
+      args: "-v SCENARIO:install"
+  publish:
+    needs: [build, qemu]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Promote tested digests and create the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          RUNTIME: ${{ needs.build.outputs.runtime }}
+          CANDIDATE: ${{ needs.build.outputs.candidate }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$GH_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # Inspect all destination tags before copying anything. Existing versions are immutable.
+          for destination in "${IMAGE%:*}:$VERSION" "$RUNTIME:$VERSION"; do
+            error="$(mktemp)"
+            if skopeo inspect "docker://$destination" >/dev/null 2>"$error"; then
+              echo "Refusing to overwrite $destination" >&2; exit 1
+            fi
+            grep -qiE 'manifest unknown|name unknown' "$error" || { cat "$error" >&2; exit 1; }
+          done
+          for pair in "$IMAGE|${IMAGE%:*}:$VERSION" "$RUNTIME:$CANDIDATE|$RUNTIME:$VERSION"; do
+            source="${pair%|*}"; destination="${pair#*|}"
+            digest="$(skopeo inspect "docker://$source" --format '{{.Digest}}')"
+            skopeo copy --preserve-digests "docker://${source%:*}@$digest" "docker://$destination"
+          done
+          gh release create "$VERSION" --target "$GITHUB_SHA" --prerelease --title "idp-reworked $VERSION" --notes-file RELEASE_NOTES.md
