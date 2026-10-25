@@ -1,8 +1,8 @@
 # ns8-idp-reworked
 
-Vorbereitung der Vorabversion **0.1.0-rc.1**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel und Tokenlaufzeit; kein Stable-/Katalogrelease.
+Veröffentlichte Vorabversion **0.1.0-rc.1**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel und Tokenlaufzeit; kein Stable-/Katalogrelease.
 
-[Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
+[Prüfnachweise und Image-Digests](docs/RELEASE-0.1.0-rc.1.md) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
 Single sign-on and identity federation for NethServer 8 applications, based on Keycloak
 
@@ -15,7 +15,7 @@ Install the module (application) on cluster node 1:
 The output of the command will return the module identifier:
 Output example:
 
-    {"module_id": "idp1", "image_name": "idp", "image_url": "ghcr.io/platypuschan/idp-reworked:0.1.0-rc.1"}
+    {"module_id": "idp-reworked1", "image_name": "idp-reworked", "image_url": "ghcr.io/platypuschan/idp-reworked:0.1.0-rc.1"}
 
 ## Configure
 
