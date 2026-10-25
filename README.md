@@ -1,8 +1,8 @@
 # ns8-idp-reworked
 
-Vorabversion **0.1.0-rc.2**, vorbereitet und noch nicht veröffentlicht; zuletzt veröffentlicht ist 0.1.0-rc.1. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
+Veröffentlichte Vorabversion **0.1.0-rc.2**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
 
-[Prüfnachweise und Image-Digests 0.1.0-rc.1](docs/RELEASE-0.1.0-rc.1.md) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
+[Prüfnachweise und Image-Digests](docs/RELEASE-0.1.0-rc.2.md) ([0.1.0-rc.1](docs/RELEASE-0.1.0-rc.1.md)) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
 Single sign-on for NethServer 8 applications, based on Keycloak
 
