@@ -1,5 +1,9 @@
 # Single sign-on
 
+> **ns8-idp-reworked:** scenario 2, the federation with a cloud identity
+> provider like Microsoft Entra ID, is not part of this module. The notes
+> below are kept as the upstream design record.
+
 Design notes and prototype results for this module, copied from
 `docs/sso.md` of NethServer/ns8-core. The prototype files are in
 this repository: `imageroot/systemd/user/keycloak.service` (the

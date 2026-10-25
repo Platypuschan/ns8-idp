@@ -4,7 +4,7 @@ Veröffentlichte Vorabversion **0.1.0-rc.1**. Eigenständiges angepasstes Modul 
 
 [Prüfnachweise und Image-Digests](docs/RELEASE-0.1.0-rc.1.md) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
-Single sign-on and identity federation for NethServer 8 applications, based on Keycloak
+Single sign-on for NethServer 8 applications, based on Keycloak
 
 ## Install
 
@@ -95,10 +95,12 @@ provider module:
 Any module publishing the `oidc` service is expected to implement the
 `register-client` action and the `clientadm` role as described here.
 
-## Optional client group access (draft)
+## Client group access
 
-An administrator can restrict an NS8 module's OIDC client to the **direct**
-members of one LDAP group in its user domain:
+An administrator can restrict the OIDC client of an NS8 module to the
+**direct** members of one group of its user domain. In the UI, open the
+**Access** page of the idp, choose the group of the application and save;
+**Check** runs the live check described below. With the API:
 
 ```sh
 api-cli run module/idp-reworked1/alter-realm-client --data '{"domain":"ad.example.org","client_id":"vaultwarden1","access_group":"services_vaultwarden"}'
@@ -106,46 +108,57 @@ api-cli run module/idp-reworked1/alter-realm-client --data '{"domain":"ad.exampl
 
 Omitting `access_group` preserves the policy; `null` removes it. Client
 re-registration preserves both the policy and an administrator-disabled
-state. Only administrators can set the policy. No UI field is supplied by
-this draft; use the action API. `list-realms` also reports `access_group`.
+state. Only administrators can set the policy. `list-realms` also reports
+`access_group`.
 
-The required action checks membership at password, SSO-cookie and broker
-login, and the protocol mapper checks code redemption, refresh and userinfo.
-The check evicts only the authenticating user's shared cache entry, reloads
-LDAP membership, and denies access on directory failure. The federation's
-cache policy and the existing realm login flows are preserved. A writable
-LDAP federation is supported when its group mapper is read-only. Broker
-identities must be linked to that LDAP federation; external-only identities
-are denied. Nested membership is not supported.
+The required action checks membership at password and SSO-cookie logins,
+with any protocol: SAML logins of a client with the policy are denied too.
+The protocol mapper checks code redemption, refresh, token exchange and
+userinfo. The check evicts only the authenticating user's shared cache
+entry, reloads LDAP membership, and denies access on directory failure. The
+federation's cache policy and the realm login flows are preserved. Nested
+membership is not supported.
 
-Restricted clients use OIDC authorization code flow (including PKCE).
-Applying the policy disables implicit flow, direct grants and service
-accounts. Other grants and SAML are outside the validated scope. Tokens
-already issued and application sessions retain their own validation and
-expiry rules; this does not revoke an offline application session or vault.
+Applying the policy switches off the implicit flow, direct grants, service
+accounts, the device grant, CIBA and standard token exchange of the client.
+If an administrator switches one on again in the Keycloak console, it is
+reported as an issue; device logins and token exchanges of non-members are
+still denied. Tokens already issued and application sessions keep their own
+expiry: an application can end them itself, like the Vaultwarden module
+does.
+
+Setting a policy never disables the client. The checks act only on clients
+with the policy attribute, so the required action and the token mapper are
+put in place first, and one client update then sets the policy: a failure
+leaves the client as it was, unrestricted, or restricted already. Trying
+again completes it.
+
+### Client access status
 
 A module with the `clientadm` role can read only its own policy:
 
 ```python
 response = agent.tasks.run(agent_id="module/idp-reworked1", action="get-client-access",
-    data={"domain": "ad.example.org"})
+    data={"domain": "ad.example.org", "live": True})
 ```
 
-Administrators supply `client_id`. The response contains `enforced`,
-`enabled`, `group`, `group_path` and `issues`. Check `enabled` separately:
-`enforced` verifies configuration structure, not live LDAP availability or
-membership. An LDAP-deleted group may still be imported in Keycloak and
-report `enforced: true`, while real login is denied.
+Administrators, in the UI or with `api-cli`, supply `client_id`. The
+response contains `enforced`, `enabled`, `group`, `group_path` and
+`issues`: `enforced` means that every part of the policy is configured.
+With `"live": true` it also contains `live`:
 
-Unknown-group preflight failures leave the client unchanged. A later failure
-after disabling the client leaves it disabled. Startup and cluster-event
-reconciliation repair missing enforcement components but never re-enable
-that client; an administrator must review the policy and explicitly recover
-it with `alter-realm-client`. Reconciliation is event-driven, not continuous
-protection against changes by a Keycloak administrator. Removing a module
-removes its client; registration of a new instance requires a new policy.
-The required action remains registered and permits clients without a policy.
-No browser-flow copies or prototype migration are installed.
+- `ldap_connection`: Keycloak binds to LDAP with the federation settings;
+- `group_in_ldap`: the group still exists in the user domain. A group
+  removed from LDAP stays imported in Keycloak, so `enforced` stays true,
+  while nobody can sign in;
+- `user_allowed`: only for administrators, with `"user": "<name>"`: the
+  user passes the token check now. It runs the token mapper of the client
+  with a Keycloak example token, without signing in;
+- `ok` and `issues`: false and the reasons if any live check fails.
+
+Startup and cluster-event reconciliation restore missing parts of the
+policies. Removing a module removes its client; registration of a new
+instance requires a new policy.
 
 ### Optional access-token lifetime
 
@@ -161,58 +174,16 @@ application with a 600-second session requirement can include:
 See [client-access testing and remaining work](docs/CLIENT-ACCESS.md) for
 reproducible tests and the limitations of this draft.
 
-## Federated identity providers
+## No external identity providers
 
-The realm of an internal Active Directory user domain can accept the
-logins of a federated identity provider (IdP), like Microsoft Entra ID.
-At the first login of a federated user, Keycloak creates the account in
-the user domain. Native accounts keep logging in with their password,
-next to the IdP login button.
-
-In the Entra admin center, register an application with the redirect
-URI of the realm, a client secret, and the optional ID token claims
-`email`, `given_name` and `family_name`. Then add the IdP:
-
-    api-cli run module/idp-reworked1/add-federated-idp --data '{"domain": "ad.example.org", "type": "entra", "entra": {"tenant_id": "...", "client_id": "...", "client_secret": "..."}}'
-
-The output contains the redirect URI of the realm, also listed by
-`list-realms`:
-
-    {"alias": "entra", "redirect_uri": "https://sso.example.org/realms/ad.example.org/broker/entra/endpoint"}
-
-The action checks the credentials with a token request to Entra ID,
-unless `"check_credentials": false`. `alter-federated-idp` changes the
-given attributes only, for example `{"enabled": false}` or a new
-`client_secret`. `remove-federated-idp` removes the IdP: federated
-accounts stay in the user domain, and log in with a password only if an
-administrator sets one.
-
-A realm with a federated IdP has a login mode, set with `alter-realm`:
-
-- `mixed` (default): Keycloak shows its password form next to the IdP
-  login button, so native accounts keep logging in with their password;
-- `federated`: Keycloak accepts only the federated IdP. Its login page
-  redirects straight to the IdP, and password logins through Keycloak
-  are refused. It requires exactly one enabled IdP: while a realm is
-  federated, its IdP cannot be disabled or removed, and no other IdP can
-  be added or enabled. Switch it back to `mixed` first.
-
-      api-cli run module/idp-reworked1/alter-realm --data '{"domain": "ad.example.org", "login_mode": "federated"}'
-
-  The output reports how many enabled native accounts, without the
-  federated account marker, lose their SSO logins:
-
-      {"native_accounts": 8}
-
-The realm login mode is independent of the applications. It does not
-stop password logins in an application that shows its own login form:
-in a federated realm, applications should use exclusive SSO (their
-`OIDC_LOGIN_MODE`), so their login pages go straight to Keycloak.
-Non-browser protocols, like IMAP and WebDAV, keep using LDAP passwords
-by design.
-
-OpenLDAP user domains are not supported yet: their accounts need numeric
-IDs that Keycloak cannot allocate.
+This module does not federate realms with external identity providers,
+like Microsoft Entra ID: users and groups come only from the NS8 user
+domain, read-only. Realms of earlier versions with federated IdPs are
+cleaned up at the next Keycloak start: the IdPs created by the module,
+its login flow copies and the writable LDAP federation are removed, and
+the service account of the module is removed from the user domain.
+Accounts created in LDAP by federated logins stay, without a password.
+IdPs added with the Keycloak console are left alone.
 
 ## Uninstall
 
@@ -340,54 +311,6 @@ are not granted to the `clientadm` role:
 The client secret is returned in the task output, which the core keeps
 in Redis for a while, like the bind credentials of user domains.
 
-### Federated IdPs
-
-A realm without federated IdPs has read-only access to its user domain.
-The first federated IdP grants write access, and the last one removed
-takes it back:
-
-- the idp creates its service account in the user domain with the
-  `samba@any:domadm` authorization, as a member of `Domain Admins`, and
-  the LDAP federation binds as it and writes the accounts of new
-  federated users. The service account is excluded from the federation,
-  but NS8 lists it among the domain users;
-- the LDAP mappers write accounts like the NS8 AD accounts: the user
-  name in `cn`, the full name in `displayName`, no `givenName` and `sn`,
-  and `pwdLastSet` set, so Samba does not require a password change.
-
-Federated accounts carry a marker in LDAP: the IdP alias in
-`employeeType` and the immutable user ID at the IdP (the Entra ID `oid`)
-in `employeeNumber`. The marker
-
-- links the federated identity to an existing account, with the NS8
-  link authenticator in the first broker login flow, also for accounts
-  provisioned in advance or after the loss of the Keycloak database;
-- denies password logins to the account, in the browser and direct
-  grant flows: otherwise it could log in without the IdP, bypassing
-  its multi-factor authentication and conditional access. The denial of
-  an IdP is removed with the IdP.
-
-The `federated` login mode disables the password forms subflow of the
-browser flow, configures the Identity Provider Redirector with the IdP
-as default provider, and binds a direct grant flow that denies every
-login. Keycloak draws the IdP buttons inside its password form, so a
-federated realm cannot offer a choice among several IdPs: the actions
-keep exactly one IdP enabled while a realm is federated. The mode is
-recorded in the `ns8_login_mode` realm attribute.
-
-Keycloak returns IdP secrets masked: the idp keeps the IdP settings and
-the service account password in `state/federation.json`, mode 0600.
-
-The service account stays visible in the NS8 users list of the domain.
-If it is removed, or its password is changed by mistake, the LDAP
-federation of the realm cannot bind, and logins fail. To recover it,
-run:
-
-    runagent -m idp1 register-service-account ad.example.org
-
-The command creates the account again, or resets its password, and
-applies the new credentials to the realm.
-
 ### Keycloak administration
 
 Actions, event handlers and helper scripts configure Keycloak through
@@ -425,10 +348,13 @@ To recover lost credentials, remove `state/ns8-agent.json` and restart
 applies the cluster configuration to every realm of the module:
 
 - the LDAP federation follows the user domain settings, like the bind
-  password and the ldapproxy port;
+  password and the ldapproxy port, and federated IdPs of earlier
+  versions are removed;
 - the client of a module is deleted when the module is no longer bound
   to the user domain of the realm, for example after its removal;
-- the SMTP settings follow the node smarthost.
+- the SMTP settings follow the node smarthost;
+- the access policies of the clients are complete: the required action
+  is enabled and every restricted client has its token mapper.
 
 It runs after every Keycloak start, because events can be lost, and on
 the `user-domain-changed`, `module-domain-changed`, `module-removed` and

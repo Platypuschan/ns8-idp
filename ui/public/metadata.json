@@ -1,8 +1,8 @@
 {
   "name": "Identity Provider Reworked (preview)",
   "description": {
-    "it": "Single sign-on e identit\u00e0 federata per le applicazioni NethServer 8, basata su Keycloak",
-    "en": "Single sign-on and identity federation for NethServer 8 applications, based on Keycloak"
+    "it": "Single sign-on per le applicazioni NethServer 8, basato su Keycloak",
+    "en": "Single sign-on for NethServer 8 applications, based on Keycloak"
   },
   "categories": [
     "core",

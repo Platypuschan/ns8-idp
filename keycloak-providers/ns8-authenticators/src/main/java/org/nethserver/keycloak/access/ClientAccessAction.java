@@ -7,7 +7,7 @@ import org.keycloak.authentication.RequiredActionProvider;
 /** Deny the login to a client with an access policy, if the user is not
  * a current member of its group. Keycloak evaluates the triggers of the
  * enabled required actions when any authentication completes: password,
- * SSO cookie and federated IdP logins alike, so the realm flows stay as
+ * SSO cookie logins alike, so the realm flows stay as
  * they are. The action is added to the authentication session only, not
  * to the user.
  */

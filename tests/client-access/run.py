@@ -28,7 +28,7 @@ for name in ('agent', 'agent.ldapproxy', 'agent.tasks', 'cluster', 'cluster.user
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / 'imageroot/pypkg'))
 import idpaccess
-import idpfed
+import idplegacy
 import idprealm
 
 
@@ -67,6 +67,14 @@ def port():
         return s.getsockname()[1]
 
 
+class HTTPError(RuntimeError):
+    """An admin API error, with the status and body like kcadmin.KeycloakError."""
+    def __init__(self, method, path, status, body):
+        super().__init__(f'{method} {path}: {status} {body[:400]}')
+        self.status = status
+        self.body = body
+
+
 class Admin:
     def __init__(self, url, password):
         self.url = url
@@ -84,7 +92,7 @@ class Admin:
             self.token = None
             return self.request(method, path, data, params)
         if response.status_code >= 400:
-            raise RuntimeError(f'{method} {path}: {response.status_code} {response.text[:400]}')
+            raise HTTPError(method, path, response.status_code, response.text)
         return response.json() if response.content else response.headers.get('Location')
     def get(self, p, params=None): return self.request('GET', p, params=params)
     def post(self, p, data=None): return self.request('POST', p, data)
@@ -358,126 +366,6 @@ class LoginTests(unittest.TestCase):
         self.assertIsNone(target)
 
 
-    def broker_auth(self, password, session=None, client='vaultwarden1', federated=False):
-        """Sign in through the external IdP. Return (session, last response,
-        callback URL or None, visited URLs)."""
-        s=session or requests.Session()
-        url=self.url+'/realms/ad.test/protocol/openid-connect/auth?'+urlencode({
-            'client_id':client,'redirect_uri':self.vw_url+'/identity/connect/oidc-signin',
-            'response_type':'code','scope':'openid profile email','state':secrets.token_urlsafe(24)})
-        r=s.get(url,allow_redirects=False,timeout=20)
-        visited=[url]
-        for _ in range(30):
-            for cookie in s.cookies:
-                if cookie.domain == '127.0.0.1': cookie.secure = False
-            if r.is_redirect:
-                target=urljoin(r.url,r.headers['Location'])
-                visited.append(target)
-                if target.startswith(self.vw_url):
-                    return s,r,target,visited
-                r=s.get(target,allow_redirects=False,timeout=20)
-                continue
-            page=Form(r.text)
-            if '/realms/ext/' in r.url and page.action:
-                r=s.post(page.action,data={'username':'fedx','password':password},allow_redirects=False,timeout=20)
-                continue
-            if '/realms/ad.test/' in r.url and page.action:
-                if federated:
-                    self.fail('The password form of the realm is shown in federated login mode')
-                link=next(l for l in page.links if '/broker/ext/' in l)
-                r=s.get(urljoin(r.url,link.replace('&amp;','&')),allow_redirects=False,timeout=20)
-                continue
-            form=next((f for i,f in page.forms.items() if 'profile' in i or 'update' in i),None)
-            if form:
-                # First broker login: review the profile received from the IdP
-                r=s.post(urljoin(r.url,form['action']),data=form['inputs'],allow_redirects=False,timeout=20)
-                continue
-            return s,r,None,visited
-        self.fail('Redirect loop')
-
-    def test_11_writable_federation_and_federated_idp(self):
-        """Realm with a federated IdP, configured with the unchanged upstream
-        functions: writable LDAP federation, NS8 flows, password denial and
-        both login modes. A second realm of the same Keycloak stands in for
-        Microsoft Entra ID."""
-        kc=self.kc
-        comp=kc.get('/ad.test/components/'+self.component['id'])
-        original=dict(comp['config'])
-        comp['config'].update({'editMode':['WRITABLE'],'syncRegistrations':['true']})
-        kc.put('/ad.test/components/'+comp['id'],comp)
-        ext_password=secrets.token_urlsafe(18)+'Aa1!'
-        kc.post('',{'realm':'ext','enabled':True,'sslRequired':'none'})
-        ext_secret=secrets.token_urlsafe(32)
-        kc.post('/ext/clients',{'clientId':'ad-broker','protocol':'openid-connect','publicClient':False,
-            'secret':ext_secret,'standardFlowEnabled':True,
-            'redirectUris':[self.url+'/realms/ad.test/broker/ext/endpoint']})
-        kc.post('/ext/users',{'username':'fedx','enabled':True,'email':'fedx@example.test','emailVerified':True,
-            'firstName':'Fed','lastName':'User','credentials':[{'type':'password','value':ext_password,'temporary':False}]})
-        try:
-            idpfed.ensure_writable_mappers(kc,'ad.test',comp['id'])
-            idpfed.ensure_user_profile(kc,'ad.test')
-            idpfed.ensure_flows(kc,'ad.test')
-            idpfed.ensure_password_denial(kc,'ad.test','ext','External')
-            # Keycloak calls the token endpoint from its own container
-            internal='http://127.0.0.1:8080/realms/ext/protocol/openid-connect'
-            rep=idpfed.entra_idp_rep('ext','External',{'tenant_id':'x','client_id':'ad-broker','client_secret':ext_secret})
-            rep['config'].update({'issuer':self.url+'/realms/ext',
-                'authorizationUrl':self.url+'/realms/ext/protocol/openid-connect/auth',
-                'tokenUrl':internal+'/token','jwksUrl':internal+'/certs',
-                'logoutUrl':self.url+'/realms/ext/protocol/openid-connect/logout'})
-            kc.post('/ad.test/identity-provider/instances',rep)
-            for mapper in idpfed.entra_idp_mappers('ext'):
-                if mapper['name']=='idp id':
-                    mapper['config']['claim']='sub'
-                kc.post('/ad.test/identity-provider/instances/ext/mappers',mapper)
-            # The policy is still complete with the writable federation
-            state=idpaccess.access_state(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'))
-            self.assertTrue(state['enforced'],state)
-            with self.subTest('native accounts with the writable federation'):
-                _,_,target,_=self.auth('allowed')
-                self.assertIn('code=',target or '')
-                _,r,target,_=self.auth('denied')
-                self.assertIsNone(target)
-                self.assertEqual(r.status_code,403)
-            with self.subTest('first federated login creates the account and is denied'):
-                session,r,target,_=self.broker_auth(ext_password)
-                self.assertIsNone(target,'federated non-member got an authorization code')
-                self.assertEqual(r.status_code,403,r.text[-500:])
-                out=cmd('podman','exec',self.samba,'samba-tool','user','show','fedx').stdout
-                self.assertIn('employeeType: ext',out)
-            with self.subTest('same SSO session, unrestricted client'):
-                _,r,target,_=self.broker_auth(ext_password,session=session,client='other1')
-                self.assertIn('code=',target or '',r.text[-500:])
-            cmd('podman','exec',self.samba,'samba-tool','group','addmembers','services_vaultwarden','fedx')
-            with self.subTest('member after group change, existing SSO session'):
-                _,r,target,_=self.broker_auth(ext_password,session=session)
-                self.assertIn('code=',target or '',r.text[-500:])
-            with self.subTest('federated login mode applies to the restricted client'):
-                idpfed.apply_login_mode(kc,'ad.test','federated')
-                try:
-                    _,r,target,visited=self.broker_auth(ext_password,federated=True)
-                    self.assertTrue(any('/realms/ext/' in u for u in visited))
-                    self.assertIn('code=',target or '',r.text[-500:])
-                finally:
-                    idpfed.apply_login_mode(kc,'ad.test','mixed')
-            cmd('podman','exec',self.samba,'samba-tool','group','removemembers','services_vaultwarden','fedx')
-            with self.subTest('fresh federated login after removal'):
-                _,r,target,_=self.broker_auth(ext_password)
-                self.assertIsNone(target)
-                self.assertEqual(r.status_code,403)
-        finally:
-            for idp in kc.get('/ad.test/identity-provider/instances'):
-                idpfed.remove_password_denial(kc,'ad.test',idp['alias'])
-                kc.delete('/ad.test/identity-provider/instances/'+idp['alias'])
-            idpfed.reset_flows(kc,'ad.test')
-            idpfed.ensure_read_only_mappers(kc,'ad.test',comp['id'])
-            comp=kc.get('/ad.test/components/'+comp['id'])
-            comp['config'].update({'editMode':original['editMode'],'syncRegistrations':original['syncRegistrations']})
-            kc.put('/ad.test/components/'+comp['id'],comp)
-            kc.delete('/ext')
-        _,_,target,_=self.auth('allowed')
-        self.assertIn('code=',target or '')
-
     def test_12_access_token_lifespan_is_optional(self):
         kc=self.kc
         lifespan=lambda cid: (kc.find_client('ad.test',cid).get('attributes') or {}).get('access.token.lifespan') or None
@@ -558,6 +446,213 @@ class LoginTests(unittest.TestCase):
         self.assertIsNone(target)
         _,_,target,_=self.auth('allowed')
         self.assertIn('code=',target or '')
+
+
+    def test_30_federated_idps_of_earlier_versions_are_removed(self):
+        """A realm configured by 0.1.0-rc.1 with a federated IdP: NS8 flow
+        copies bound to the realm, a writable LDAP federation with its
+        mappers, and an IdP using the NS8 first broker login flow."""
+        kc=self.kc
+        comp=kc.get('/ad.test/components/'+self.component['id'])
+        original=json.loads(json.dumps(comp['config']))
+        comp['config'].update({'editMode':['WRITABLE'],'syncRegistrations':['true']})
+        kc.put('/ad.test/components/'+comp['id'],comp)
+        for name in ('cn','ns8_idp'):
+            kc.post('/ad.test/components',{'name':name,'providerId':'user-attribute-ldap-mapper',
+                'providerType':idplegacy.MAPPER_TYPE,'parentId':comp['id'],'config':{
+                    'ldap.attribute':[name if name=='cn' else 'employeeType'],
+                    'user.model.attribute':['username' if name=='cn' else name],'read.only':['false'],
+                    'always.read.value.from.ldap':['false'],'is.mandatory.in.ldap':['false']}})
+        for builtin,copy in (('browser','ns8 browser'),('direct grant','ns8 direct grant'),
+                ('first broker login','ns8 first broker login')):
+            kc.post('/ad.test/authentication/flows/'+builtin.replace(' ','%20')+'/copy',{'newName':copy})
+        kc.put('/ad.test',{'browserFlow':'ns8 browser','directGrantFlow':'ns8 direct grant'})
+        kc.post('/ad.test/identity-provider/instances',{'alias':'entra','providerId':'oidc','enabled':True,
+            'firstBrokerLoginFlowAlias':'ns8 first broker login','config':{'clientId':'x','clientSecret':'y',
+            'authorizationUrl':'https://login.example.test/auth','tokenUrl':'https://login.example.test/token'}})
+        # An IdP added with the Keycloak console is left alone
+        kc.post('/ad.test/identity-provider/instances',{'alias':'manual','providerId':'oidc','enabled':False,
+            'config':{'clientId':'x','clientSecret':'y','authorizationUrl':'https://login.example.test/auth',
+            'tokenUrl':'https://login.example.test/token'}})
+        self.addCleanup(lambda:kc.delete('/ad.test/identity-provider/instances/manual'))
+        self.assertTrue(idplegacy.needs_cleanup(kc,'ad.test','ns8-ldap'))
+        def ensure_federation(kc_, realm):
+            # Stands in for idprealm.ensure_federation, which reads the NS8
+            # user domain: apply the read-only settings of this runner
+            c=kc_.get('/ad.test/components/'+comp['id'])
+            c['config'].update({'editMode':original['editMode'],'syncRegistrations':original['syncRegistrations']})
+            kc_.put('/ad.test/components/'+comp['id'],c)
+        idplegacy.remove_federated_idps(kc,'ad.test','ns8-ldap',ensure_federation)
+        self.assertEqual([i['alias'] for i in kc.get('/ad.test/identity-provider/instances')],['manual'])
+        realm=kc.get('/ad.test')
+        self.assertEqual((realm['browserFlow'],realm['directGrantFlow']),('browser','direct grant'))
+        self.assertFalse([f for f in kc.get('/ad.test/authentication/flows') if f['alias'].startswith('ns8 ')])
+        comp=kc.get('/ad.test/components/'+comp['id'])
+        self.assertEqual(comp['config']['editMode'],['READ_ONLY'])
+        mappers=kc.get('/ad.test/components',params={'parent':comp['id'],'type':idplegacy.MAPPER_TYPE})
+        self.assertFalse({'cn','ns8_idp'} & {m['name'] for m in mappers})
+        self.assertFalse([m for m in mappers if m['config'].get('read.only')==['false']])
+        self.assertFalse(idplegacy.needs_cleanup(kc,'ad.test','ns8-ldap'))
+        # Idempotent, and the policy works as before
+        idplegacy.remove_federated_idps(kc,'ad.test','ns8-ldap',ensure_federation)
+        self.assertTrue(idpaccess.access_state(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'))['enforced'])
+        _,_,target,_=self.auth('allowed')
+        self.assertIn('code=',target or '')
+        _,r,target,_=self.auth('denied')
+        self.assertIsNone(target)
+        self.assertEqual(r.status_code,403)
+
+    def saml_client(self, name, group_client='vaultwarden1'):
+        """A SAML client, created as with the Keycloak console, with the
+        policy attributes of another client copied: the module API sets
+        policies on its OIDC clients only."""
+        acs=self.vw_url+'/saml/acs'
+        policy={k:v for k,v in self.kc.find_client('ad.test',group_client)['attributes'].items() if k.startswith('ns8.access')}
+        self.kc.post('/ad.test/clients',{'clientId':name,'protocol':'saml','enabled':True,
+            'redirectUris':[acs],'frontchannelLogout':False,'attributes':dict(policy,**{
+                'saml.client.signature':'false','saml.force.post.binding':'true',
+                'saml_assertion_consumer_url_post':acs,'saml_idp_initiated_sso_url_name':name})})
+        client=self.kc.find_client('ad.test',name)
+        self.addCleanup(lambda:self.kc.delete('/ad.test/clients/'+client['id']))
+        return client,acs
+
+    def saml_login(self, username, url, session=None, require_cookie=False):
+        """Follow a SAML login. Return (last response, SAMLResponse or None)."""
+        s=session or requests.Session()
+        r=s.get(url,allow_redirects=False,timeout=20)
+        for _ in range(20):
+            for cookie in s.cookies:
+                if cookie.domain == '127.0.0.1': cookie.secure = False
+            if r.is_redirect:
+                r=s.get(urljoin(r.url,r.headers['Location']),allow_redirects=False,timeout=20)
+                continue
+            page=Form(r.text)
+            for form in page.forms.values():
+                if 'SAMLResponse' in form['inputs']:
+                    return r,form['inputs']['SAMLResponse']
+            if page.action:
+                if require_cookie:
+                    self.fail('Expected reuse of the existing SSO cookie')
+                r=s.post(page.action,data={'username':username,'password':self.password},allow_redirects=False,timeout=20)
+                continue
+            return r,None
+        self.fail('Redirect loop')
+
+    def test_31_saml_logins_run_the_required_action(self):
+        """Hypothesis: the required action does not depend on the protocol,
+        so it also restricts SAML logins, SP- and IdP-initiated, with and
+        without an SSO cookie."""
+        import zlib
+        client,acs=self.saml_client('saml-review')
+        def sp_initiated():
+            request=(f'<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" '
+                f'xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_{secrets.token_hex(16)}" Version="2.0" '
+                f'IssueInstant="{time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())}" '
+                f'Destination="{self.url}/realms/ad.test/protocol/saml" AssertionConsumerServiceURL="{acs}" '
+                f'ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST">'
+                f'<saml:Issuer>saml-review</saml:Issuer></samlp:AuthnRequest>')
+            deflate=zlib.compressobj(9,zlib.DEFLATED,-15)
+            data=deflate.compress(request.encode())+deflate.flush()
+            return self.url+'/realms/ad.test/protocol/saml?'+urlencode({'SAMLRequest':base64.b64encode(data).decode()})
+        idp_initiated=self.url+'/realms/ad.test/protocol/saml/clients/saml-review'
+        for label,url in (('SP-initiated',sp_initiated),('IdP-initiated',lambda:idp_initiated)):
+            with self.subTest(label):
+                r,response=self.saml_login('allowed',url())
+                self.assertTrue(response,f'{label}: member got no SAMLResponse: {r.status_code} {r.text[-500:]}')
+                self.assertIn('allowed',base64.b64decode(response).decode())
+                r,response=self.saml_login('denied',url())
+                self.assertIsNone(response)
+                self.assertEqual(r.status_code,403)
+                # SSO cookie of an unrestricted client
+                session,_,target,_=self.auth('denied',client='other1')
+                self.assertIn('code=',target or '')
+                r,response=self.saml_login('denied',url(),session=session,require_cookie=True)
+                self.assertIsNone(response)
+                self.assertEqual(r.status_code,403)
+
+    def device_login(self, client, secret, username):
+        """Run the device authorization grant. Return the token response."""
+        base=self.url+'/realms/ad.test/protocol/openid-connect'
+        device=requests.post(base+'/auth/device',data={'client_id':client,'client_secret':secret,
+            'scope':'openid'},timeout=20)
+        self.assertEqual(device.status_code,200,device.text)
+        device=device.json()
+        s=requests.Session()
+        r=s.get(device['verification_uri_complete'],allow_redirects=False,timeout=20)
+        for _ in range(20):
+            for cookie in s.cookies:
+                if cookie.domain == '127.0.0.1': cookie.secure = False
+            if r.is_redirect:
+                r=s.get(urljoin(r.url,r.headers['Location']),allow_redirects=False,timeout=20)
+                continue
+            page=Form(r.text)
+            if page.action:
+                r=s.post(page.action,data={'username':username,'password':self.password},allow_redirects=False,timeout=20)
+                continue
+            # The consent page of the device grant: its buttons are not inputs
+            consent=next((f for f in page.forms.values() if f['action']),None) if 'name="accept"' in r.text else None
+            if consent:
+                r=s.post(urljoin(r.url,consent['action']),data=dict(consent['inputs'],accept='Yes'),
+                    allow_redirects=False,timeout=20)
+                continue
+            break
+        self.device_page=r
+        return requests.post(base+'/token',data={'grant_type':'urn:ietf:params:oauth:grant-type:device_code',
+            'device_code':device['device_code'],'client_id':client,'client_secret':secret},timeout=20)
+
+    def test_32_device_grant_switched_on_again(self):
+        """An administrator switches the device grant on again in the
+        Keycloak console: it is reported, and still denied to non-members."""
+        kc=self.kc
+        client=kc.find_client('ad.test','vaultwarden1')
+        client['attributes']['oauth2.device.authorization.grant.enabled']='true'
+        kc.put('/ad.test/clients/'+client['id'],client)
+        try:
+            state=idpaccess.access_state(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'))
+            self.assertEqual(state['issues'],['device_grant_set'])
+            token=self.device_login('vaultwarden1',self.secret,'denied')
+            self.assertEqual(self.device_page.status_code,403,self.device_page.text[-500:])
+            self.assertNotIn('access_token',token.json())
+            token=self.device_login('vaultwarden1',self.secret,'allowed')
+            self.assertEqual(token.status_code,200,token.text)
+            self.assertIn('access_token',token.json())
+        finally:
+            state=idpaccess.set_policy(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'),'services_vaultwarden')
+        self.assertTrue(state['enforced'],state)
+        self.assertEqual(kc.find_client('ad.test','vaultwarden1')['attributes']['oauth2.device.authorization.grant.enabled'],'false')
+
+    def test_33_token_exchange_switched_on_again(self):
+        """Standard token exchange of a token of an unrestricted client,
+        switched on in the Keycloak console: the token gate denies it to
+        non-members."""
+        kc=self.kc
+        redirect=[self.vw_url+'/identity/connect/oidc-signin']
+        # Tokens of other1 must have vaultwarden1 in their audience
+        other_secret=idprealm.ensure_client(kc,'ad.test','other1',redirect_uris=redirect,audience=['vaultwarden1'])
+        client=kc.find_client('ad.test','vaultwarden1')
+        client['attributes']['standard.token.exchange.enabled']='true'
+        kc.put('/ad.test/clients/'+client['id'],client)
+        token_url=self.url+'/realms/ad.test/protocol/openid-connect/token'
+        try:
+            self.assertEqual(idpaccess.access_state(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'))['issues'],
+                ['token_exchange_set'])
+            for username,allowed in (('allowed',True),('denied',False)):
+                with self.subTest(username):
+                    _,_,target,verifier=self.auth(username,client='other1')
+                    subject=requests.post(token_url,data={'grant_type':'authorization_code','client_id':'other1',
+                        'client_secret':other_secret,'code':parse_qs(urlsplit(target).query)['code'][0],
+                        'redirect_uri':redirect[0],'code_verifier':verifier},timeout=20).json()['access_token']
+                    exchanged=requests.post(token_url,data={
+                        'grant_type':'urn:ietf:params:oauth:grant-type:token-exchange',
+                        'client_id':'vaultwarden1','client_secret':self.secret,'subject_token':subject,
+                        'subject_token_type':'urn:ietf:params:oauth:token-type:access_token'},timeout=20)
+                    self.assertEqual('access_token' in exchanged.json(),allowed,exchanged.text)
+                    if not allowed:
+                        self.assertEqual(exchanged.status_code,403,exchanged.text)
+        finally:
+            idprealm.ensure_client(kc,'ad.test','other1',redirect_uris=redirect)
+            state=idpaccess.set_policy(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'),'services_vaultwarden')
+        self.assertTrue(state['enforced'],state)
 
 
 if __name__=='__main__':
