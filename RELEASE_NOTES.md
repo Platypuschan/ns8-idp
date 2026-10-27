@@ -1,10 +1,7 @@
-Zweite Vorabversion des angepassten Identity-Provider-Moduls für NethServer 8.
+Dritte Vorabversion des angepassten Identity-Provider-Moduls für NethServer 8.
 
-- Neue Seite „Zugriff“: die zugelassene AD-Gruppe jeder Anwendung in der Oberfläche wählen, speichern und live prüfen.
-- Statusabfrage `get-client-access` mit `live`: LDAP-Erreichbarkeit, Existenz der Gruppe im AD und, für Administratoren, die Prüfung eines einzelnen Benutzers.
-- Das Setzen einer Gruppenregel deaktiviert den Client nicht mehr; bei einem Fehler bleibt er unverändert.
-- Device-Grant, CIBA und Token-Exchange werden mit der Gruppenregel abgeschaltet und als Problem gemeldet, falls sie wieder eingeschaltet werden. SAML-Anmeldungen sind durch dieselbe Prüfung abgedeckt.
-- Externe Identitätsanbieter wie Microsoft Entra ID werden nicht mehr unterstützt. Beim Start nach dem Update entfernt der IdP die vom Modul angelegten externen IdPs samt Anmeldeflows, schreibbarer LDAP-Föderation und Servicekonto; dabei angelegte AD-Konten bleiben ohne Passwort erhalten.
-- Korrigierte geerbte Workflows für API-Dokumentation und Registry-Bereinigung.
+- Die Stamm-URL des IdP-Hosts (`https://<host>/`) führt jetzt zur Kontoseite der Benutzerdomäne (`/realms/<Domäne>/account/`), wenn das Modul genau einen aktiven Realm verwaltet. Bisher führte sie zur Admin-Konsole des master-Realms; eine Anmeldung mit einem Domänenkonto scheiterte dort mit „Invalid username or password“.
+- Bei keinem oder mehreren Realms bleibt die Admin-Konsole das Ziel, damit keine Seite die Benutzerdomänen öffentlich auflistet. Die Admin-Konsole ist weiterhin unter `/admin/` erreichbar.
+- Sonst unverändert gegenüber 0.1.0-rc.2, weiterhin Keycloak 26.7.4.
 
-Keine Stable-/Katalogfreigabe. Vorabversion für Testinstallationen. Die Bereinigung ist gegen Keycloak getestet, ein NS8-Update von 0.1.0-rc.1 nicht. Physische Mobilgeräte, vollständige Cluster-Wiederherstellung und MFA-Szenarien sind nicht abgedeckt.
+Keine Stable-/Katalogfreigabe. Vorabversion für Testinstallationen. Ein NS8-Update von 0.1.0-rc.2 ist nicht automatisiert getestet. Physische Mobilgeräte, vollständige Cluster-Wiederherstellung und MFA-Szenarien sind nicht abgedeckt.

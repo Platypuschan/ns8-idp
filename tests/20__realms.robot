@@ -68,6 +68,10 @@ Create the user domain
 No realm before the first registration
     Realm is absent    ${USER_DOMAIN}
 
+The host root leads to the Administration Console without realms
+    ${location} =    Host root target
+    Should Be Equal    ${location}    https://${IDP_HOST}/admin/
+
 The client owner is required
     &{error} =    Run validation    module/${module_id}/register-client    {"domain": "${USER_DOMAIN}"}
     Should Be Equal    ${error.error}    module_id_required
@@ -90,6 +94,10 @@ Register a client creates the realm
     &{realm} =    Realm    ${USER_DOMAIN}
     Should Be True    ${realm.enabled}
     Should Be True    ${realm.user_domain_found}
+
+The host root leads to the account console of the realm
+    ${location} =    Host root target
+    Should Be Equal    ${location}    https://${IDP_HOST}/realms/${USER_DOMAIN}/account/
 
 The federation imports users and groups
     &{result} =    Run kccheck    sync    ${USER_DOMAIN}

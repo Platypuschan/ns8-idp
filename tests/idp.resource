@@ -48,3 +48,10 @@ Bound domains
     [Arguments]    ${mid}
     ${domains} =    Execute Command    redis-cli --no-auth-warning hget cluster/module_domains ${mid}
     RETURN    ${domains}
+
+Host root target
+    [Documentation]    Return the page the host root leads to: the root page forwards to the ns8-home realm resource, which redirects
+    ${page} =    Execute Command    curl -sk --resolve ${IDP_HOST}:443:127.0.0.1 https://${IDP_HOST}/
+    Should Contain    ${page}    url=https://${IDP_HOST}/realms/master/ns8-home
+    ${location} =    Execute Command    curl -sk -o /dev/null -w '\%{redirect_url}' --resolve ${IDP_HOST}:443:127.0.0.1 https://${IDP_HOST}/realms/master/ns8-home
+    RETURN    ${location}
