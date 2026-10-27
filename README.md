@@ -33,6 +33,15 @@ Read the current configuration:
 
     api-cli run module/idp-reworked1/get-configuration
 
+The host root, `https://sso.example.org/`, leads the users to the
+account console of their user domain,
+`https://sso.example.org/realms/<user domain>/account/`, where they
+log in with their domain account. This works when the module has exactly
+one enabled realm. With no realm, or more than one, the host root leads
+to the Keycloak Administration Console, as in upstream Keycloak: no
+public page lists the user domains. The account console of each realm is
+always reachable at its own URL.
+
 ## Register an application
 
 An application module registers its OIDC client in the realm of its
@@ -261,6 +270,14 @@ Runtime options are environment variables (`KC_*`):
 [imageroot/etc/keycloak.env](imageroot/etc/keycloak.env) is shipped with
 the module, and `state/passwords.env`, created by `create-module` with
 mode 0600, holds the database password.
+
+The `ns8` welcome theme, selected by `KC_SPI_THEME__WELCOME_THEME`,
+replaces the default redirect of the host root to the Administration
+Console of the master realm, which has no users of the user domains. A
+theme template cannot read the realms, so the page forwards to the
+`ns8-home` realm resource (`/realms/master/ns8-home`, in the provider
+jar), which redirects to the account console of the only enabled realm
+besides master, or to the Administration Console.
 
 ### Module configuration
 

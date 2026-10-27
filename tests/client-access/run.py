@@ -143,6 +143,7 @@ class LoginTests(unittest.TestCase):
             '-p', f'127.0.0.1:{cls.kc_port}:8080', '--env', 'KC_BOOTSTRAP_ADMIN_USERNAME',
             '--env', 'KC_BOOTSTRAP_ADMIN_PASSWORD', os.environ.get('IDP_RUNTIME_IMAGE', 'localhost/ns8-idp-client-access-test'),
             'start-dev', '--db=dev-file', '--features=scripts', '--hostname=' + cls.url,
+            '--spi-theme--welcome-theme=ns8',
             env=env)
         cls.names.append(cls.keycloak)
         wait_http(cls.url + '/realms/master/.well-known/openid-configuration', cls.names)
@@ -654,6 +655,35 @@ class LoginTests(unittest.TestCase):
             state=idpaccess.set_policy(kc,'ad.test',kc.find_client('ad.test','vaultwarden1'),'services_vaultwarden')
         self.assertTrue(state['enforced'],state)
 
+
+    def test_34_host_root(self):
+        """The host root leads to the account console of the only enabled
+        user domain realm, otherwise to the Administration Console."""
+        home=self.url+'/realms/master/ns8-home'
+        page=requests.get(self.url+'/',timeout=20)
+        self.assertEqual(page.status_code,200,page.text[-500:])
+        self.assertIn('url='+home,page.text)
+        def target():
+            response=requests.get(home,allow_redirects=False,timeout=20)
+            self.assertEqual(response.status_code,302,response.text[-500:])
+            self.assertIn('no-store',response.headers.get('Cache-Control',''))
+            return response.headers['Location']
+        account=self.url+'/realms/ad.test/account/'
+        self.assertEqual(target(),account)
+        login=requests.get(account,timeout=20)
+        self.assertEqual(login.status_code,200,login.text[-500:])
+        self.assertIn('/realms/ad.test/',login.url)
+        self.kc.post('',{'realm':'second.test','enabled':True})
+        try:
+            # Two realms: no page names the user domains
+            self.assertEqual(target(),self.url+'/admin/')
+            realm=self.kc.get('/second.test')
+            realm['enabled']=False
+            self.kc.put('/second.test',realm)
+            self.assertEqual(target(),account)
+        finally:
+            self.kc.delete('/second.test')
+        self.assertEqual(target(),account)
 
 if __name__=='__main__':
     unittest.main(verbosity=2)
