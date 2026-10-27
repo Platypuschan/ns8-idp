@@ -142,7 +142,7 @@ class LoginTests(unittest.TestCase):
         cmd('podman', 'run', '-d', '--name', cls.keycloak, '--network', cls.network,
             '-p', f'127.0.0.1:{cls.kc_port}:8080', '--env', 'KC_BOOTSTRAP_ADMIN_USERNAME',
             '--env', 'KC_BOOTSTRAP_ADMIN_PASSWORD', os.environ.get('IDP_RUNTIME_IMAGE', 'localhost/ns8-idp-client-access-test'),
-            'start-dev', '--db=dev-file', '--features=scripts', '--hostname=' + cls.url,
+            'start-dev', '--db=dev-file', '--features=scripts', '--log-level=INFO,org.nethserver.keycloak.access:DEBUG', '--hostname=' + cls.url,
             '--spi-theme--welcome-theme=ns8',
             env=env)
         cls.names.append(cls.keycloak)
@@ -173,7 +173,7 @@ class LoginTests(unittest.TestCase):
                 'group.name.ldap.attribute':'cn', 'groups.dn':'DC=ad,DC=test',
                 'group.object.classes':'group', 'preserve.group.inheritance':'false',
                 'membership.ldap.attribute':'member', 'membership.attribute.type':'DN',
-                'membership.user.ldap.attribute':'cn', 'mode':'READ_ONLY',
+                'membership.user.ldap.attribute':'cn', 'mode':'LDAP_ONLY',
                 'user.roles.retrieve.strategy':'LOAD_GROUPS_BY_MEMBER_ATTRIBUTE',
                 'drop.non.existing.groups.during.sync':'false'
             }.items()}})

@@ -145,7 +145,7 @@ class FakeKeycloak:
         if path.endswith('/components'):
             if params.get('type') == 'org.keycloak.storage.UserStorageProvider':
                 return [{'id':'ldap1','providerId':'ldap','config':{'connectionUrl':['ldap://x'],'bindDn':['cn=x']}}]
-            return [{'id':'m1','providerId':'group-ldap-mapper','config':{'mode':['READ_ONLY'],
+            return [{'id':'m1','providerId':'group-ldap-mapper','config':{'mode':['LDAP_ONLY'],
                 'user.roles.retrieve.strategy':['LOAD_GROUPS_BY_MEMBER_ATTRIBUTE']}}]
         if '/group-by-path/' in path or '/groups/' in path:
             return {'id':'g1','name':'engineering','path':'/engineering'}

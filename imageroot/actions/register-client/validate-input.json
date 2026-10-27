@@ -97,6 +97,11 @@
             ],
             "minimum": 60,
             "maximum": 86400
+        },
+        "access_required": {
+            "type": "boolean",
+            "description": "Require a client access group even if its policy is removed. Once enabled, registration never clears this requirement.",
+            "default": false
         }
     }
 }

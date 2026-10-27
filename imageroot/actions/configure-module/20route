@@ -15,6 +15,7 @@ import os
 import sys
 
 import agent
+from idp_routes import restrict_admin
 
 request = json.load(sys.stdin)
 
@@ -27,3 +28,5 @@ agent.set_route({
     "lets_encrypt_check": True,
     "lets_encrypt_cleanup": True,
 })
+
+restrict_admin(request["host"], request.get("lets_encrypt", False))

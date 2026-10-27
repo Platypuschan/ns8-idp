@@ -76,6 +76,12 @@
                 }
             },
             "additionalProperties": false
+        },
+        "policy_required": {
+            "type": "boolean"
+        },
+        "policy_group_pinned": {
+            "type": "boolean"
         }
     },
     "additionalProperties": false,

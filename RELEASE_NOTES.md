@@ -1,3 +1,7 @@
+# Unreleased security work
+
+Runtime and policy/admin hardening selected on 27 October 2026; see docs/decisions/0002-security-decisions.md. No new release or production deployment.
+
 Dritte Vorabversion des angepassten Identity-Provider-Moduls für NethServer 8.
 
 - Die Stamm-URL des IdP-Hosts (`https://<host>/`) führt jetzt zur Kontoseite der Benutzerdomäne (`/realms/<Domäne>/account/`), wenn das Modul genau einen aktiven Realm verwaltet. Bisher führte sie zur Admin-Konsole des master-Realms; eine Anmeldung mit einem Domänenkonto scheiterte dort mit „Invalid username or password“.

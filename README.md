@@ -1,3 +1,8 @@
+> Unreleased security work branch: Keycloak runtime/providers 26.8.1, LDAP-only
+> membership, sticky required policies, restricted public admin paths and
+> registration validation. See [ADR 0002](docs/decisions/0002-security-decisions.md).
+> Previously published release notes below describe their historical versions.
+
 # ns8-idp-reworked
 
 Veröffentlichte Vorabversion **0.1.0-rc.2**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
@@ -136,8 +141,9 @@ still denied. Tokens already issued and application sessions keep their own
 expiry: an application can end them itself, like the Vaultwarden module
 does.
 
-Setting a policy never disables the client. The checks act only on clients
-with the policy attribute, so the required action and the token mapper are
+Setting a policy never disables the client. Clients registered with `access_required:true` also deny access when their
+policy is removed or differs from the pinned group. For optional clients,
+the checks act only on clients with the policy attribute, so the required action and the token mapper are
 put in place first, and one client update then sets the policy: a failure
 leaves the client as it was, unrestricted, or restricted already. Trying
 again completes it.
