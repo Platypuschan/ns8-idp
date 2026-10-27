@@ -82,6 +82,9 @@
         },
         "policy_group_pinned": {
             "type": "boolean"
+        },
+        "policy_consumer_bound": {
+            "type": "boolean"
         }
     },
     "additionalProperties": false,

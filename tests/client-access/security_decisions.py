@@ -15,6 +15,53 @@ class SecurityDecisions(LoginTests):
         idpaccess.set_policy(self.kc, 'ad.test', client, 'services_vaultwarden')
         return self.kc.find_client('ad.test', name)
 
+    def test_supported_policy_edit_cannot_move_the_consumer_pin(self):
+        from run import cmd
+        group = 'policy-other'
+        cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'add', group)
+        self.addCleanup(lambda: cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'delete', group, check=False))
+        cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'addmembers', group, 'denied')
+        client = self.new_required()
+        try:
+            idpaccess.set_policy(self.kc, 'ad.test', client, group)
+        except idpaccess.PolicyError as error:
+            self.assertEqual(error.code, 'policy_incomplete')
+        after = self.kc.find_client('ad.test', 'required-test')
+        self.assertEqual(after['attributes']['ns8.access_expected_group_id'], client['attributes']['ns8.access_expected_group_id'])
+        _, response, target, _ = self.auth('denied', client='required-test')
+        self.assertIsNone(target)
+        self.assertEqual(response.status_code, 403)
+
+    def test_explicit_consumer_binding_controls_policy_reconfiguration(self):
+        from run import cmd
+        group, name = 'consumer-other', 'consumer-bound'
+        cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'add', group)
+        self.addCleanup(lambda: cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'delete', group, check=False))
+        cmd('podman', 'exec', self.samba, 'samba-tool', 'group', 'addmembers', group, 'denied')
+        options = {'redirect_uris': [self.vw_url + '/identity/connect/oidc-signin'], 'access_required': True}
+        idprealm.ensure_client(self.kc, 'ad.test', name,
+            expected_access_group='services_vaultwarden', **options)
+        client = self.kc.find_client('ad.test', name)
+        self.addCleanup(lambda: self.kc.delete('/ad.test/clients/' + client['id']))
+        self.assertEqual(client['attributes'][idpaccess.EXPECTED_SOURCE], 'consumer')
+        state = idpaccess.set_policy(self.kc, 'ad.test', client, 'services_vaultwarden')
+        self.assertTrue(state['enforced'])
+        with self.assertRaises(idpaccess.PolicyError):
+            idpaccess.set_policy(self.kc, 'ad.test', self.kc.find_client('ad.test', name), group)
+        _, response, target, _ = self.auth('denied', client=name)
+        self.assertIsNone(target)
+        self.assertEqual(response.status_code, 403)
+        # Only an explicit consumer registration for the newly configured
+        # group may advance the independent expectation.
+        idprealm.ensure_client(self.kc, 'ad.test', name, expected_access_group=group, **options)
+        after = self.kc.find_client('ad.test', name)
+        self.assertTrue(idpaccess.access_state(self.kc, 'ad.test', after)['enforced'])
+        _, response, target, _ = self.auth('denied', client=name)
+        self.assertIn('code=', target or '')
+        _, response, target, _ = self.auth('allowed', client=name)
+        self.assertIsNone(target)
+        self.assertEqual(response.status_code, 403)
+
     def test_fresh_required_registration_is_closed_before_policy_assignment(self):
         name = 'fresh-required'
         idprealm.ensure_client(self.kc, 'ad.test', name,

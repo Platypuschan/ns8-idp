@@ -18,12 +18,17 @@ Source: user decisions P1–P21 in agent-exchange task
   structural validation require this mode. Reconciliation updates existing
   federations; local records need not be deleted.
 - P7: register-client accepts a sticky access_required flag. First activation
-  pins the currently approved group ID; subsequent registrations never repin
-  an altered policy. Missing policy or a group-ID mismatch is denied by both
-  the required action and token gate. Deliberate policy edits via the NS8
-  administrator action update the pin; removing a required policy retains the
-  marker and token gate and denies access. get-client-access exposes
-  policy_required and policy_group_pinned so consumers reject older IdPs.
+  pins the currently approved group ID unless the consumer supplies its own
+  expected_access_group. The consumer expectation is resolved to a stable group
+  ID independently of the administrator policy. Registrations without an explicit
+  expectation never repin an altered policy. Missing policy or a group-ID mismatch is denied by both
+  the required action and token gate. Normal NS8 administrator policy edits
+  cannot move this independent pin either. A mismatched policy stays closed
+  (policy_incomplete) until explicitly matching module reconfiguration registers
+  the new expected group, or the original policy is restored. Removing a required
+  policy retains the marker and token gate and denies access. get-client-access exposes
+  policy_required, policy_group_pinned and policy_consumer_bound so consumers
+  reject older IdPs and incomplete bindings.
 - P12: a KeycloakSession-local decision avoids duplicate LDAP membership
   reads for access and ID token creation within one HTTP request. No decision
   survives the request. A debug-only, identifier-free lookup message permits

@@ -315,7 +315,7 @@ def validate_client_endpoints(redirect_uris, logout_uris, web_origins, audience)
             raise ValueError('invalid_client_audience')
 
 def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_uris=(),
-        web_origins=(), audience=(), rotate_secret=False, access_token_lifespan=KEEP, access_required=False):
+        web_origins=(), audience=(), rotate_secret=False, access_token_lifespan=KEEP, access_required=False, expected_access_group=KEEP):
     """Create or update the OIDC client of a module, and return its
     secret. The secret is generated on creation, and when rotate_secret
     is set. The access token lifespan, in seconds, is kept unless given;
@@ -343,6 +343,13 @@ def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_u
     }
     if access_required:
         rep["attributes"]["ns8.access_required"] = "true"
+    if expected_access_group is not KEEP:
+        if not access_required:
+            raise ValueError("expected_access_group_requires_access_required")
+        import idpaccess
+        expected = idpaccess.find_group(kc, realm, expected_access_group)
+        rep["attributes"][idpaccess.EXPECTED_GROUP] = expected["id"]
+        rep["attributes"][idpaccess.EXPECTED_SOURCE] = "consumer"
     if access_token_lifespan is not KEEP:
         # An empty value removes the attribute
         rep["attributes"][ACCESS_TOKEN_LIFESPAN] = str(access_token_lifespan or "")
@@ -367,7 +374,7 @@ def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_u
     # Protocol mappers are not updated by a client update: replace the
     # audience mappers separately
     mappers = rep.pop("protocolMappers")
-    if access_required and current.get("attributes", {}).get("ns8.access_required") != "true":
+    if access_required and expected_access_group is KEEP and current.get("attributes", {}).get("ns8.access_required") != "true":
         # Pin the already approved group on first activation, never repin
         # a changed/missing policy during subsequent registrations.
         approved = current.get("attributes", {}).get("ns8.access_group_id")

@@ -38,6 +38,7 @@ GROUP_ID = "ns8.access_group_id"
 GROUP_PATH = "ns8.access_group_path"
 REQUIRED = "ns8.access_required"
 EXPECTED_GROUP = "ns8.access_expected_group_id"
+EXPECTED_SOURCE = "ns8.access_group_binding"
 
 ACTION = "ns8-client-access"
 ACTION_NAME = "NS8 client access group"
@@ -208,9 +209,10 @@ def set_policy(kc, realm, client, group):
     client.setdefault("attributes", {}).update({
         POLICY: POLICY_GROUP,
         GROUP_ID: group_rep["id"],
-        EXPECTED_GROUP: group_rep["id"],
         GROUP_PATH: group_rep["path"],
     })
+    if not client["attributes"].get(EXPECTED_GROUP) or client["attributes"].get(REQUIRED) != "true":
+        client["attributes"][EXPECTED_GROUP] = group_rep["id"]
     client["attributes"].update({attribute: "false" for attribute in GRANT_ATTRIBUTES})
     client.update({flag: False for flag in GRANT_FLAGS})
     kc.put(f"/{realm}/clients/{client['id']}", client)
@@ -325,7 +327,7 @@ def clear_policy(kc, realm, client):
     attributes = client.setdefault("attributes", {})
     names = (POLICY, GROUP_ID, GROUP_PATH)
     if attributes.get(REQUIRED) != "true":
-        names += (EXPECTED_GROUP,)
+        names += (EXPECTED_GROUP, EXPECTED_SOURCE)
     for name in names:
         if name in attributes:
             # An empty value removes the attribute
