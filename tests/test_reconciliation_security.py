@@ -29,8 +29,17 @@ class CleanupAuthority(unittest.TestCase):
         realm.module_clients = lambda kc, name: [{'id': 'client', 'clientId': 'app1', 'attributes': {'ns8.module_id': 'app1'}}]
         kc = Mock()
         admin = types.ModuleType('kcadmin')
+        ready = False
+        def wait_ready():
+            nonlocal ready
+            ready = True
+        def managed_realms(client):
+            if not ready:
+                raise RuntimeError('HTTP 503: Bootstrap in progress')
+            return ['ad.test']
+        admin.wait_ready = wait_ready
         admin.agent_client = lambda: kc
-        admin.managed_realms = lambda kc: ['ad.test']
+        admin.managed_realms = managed_realms
         access = types.ModuleType('idpaccess')
         access.reconcile = Mock()
         legacy = types.ModuleType('idplegacy')

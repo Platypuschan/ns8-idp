@@ -51,6 +51,10 @@ def smtp_server_rep(settings):
 # Registrations and client changes modify the same realms: concurrent
 # updates of the LDAP federation fail with an optimistic lock error
 with idprealm.realms_lock():
+    # The HTTP listener can precede completion of model bootstrap during
+    # upgrades. Its 503 phase exceeds the short per-request retry budget.
+    kcadmin.wait_ready()
+
     rdb = agent.redis_connect()
     smtp_server = smtp_server_rep(agent.get_smarthost_settings(rdb))
 
