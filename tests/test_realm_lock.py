@@ -45,6 +45,7 @@ def action_worker(script, lockfile, pipe):
     def connect():
         pipe.send('keycloak-access')
         return kc
+    kcadmin.wait_ready=lambda:None
     kcadmin.agent_client=connect
     kcadmin.managed_realms=lambda kc:['ad.test']
     sys.modules.update({'agent':agent,'agent.ldapproxy':ldap,'kcadmin':kcadmin})

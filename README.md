@@ -1,3 +1,8 @@
+> Unreleased security work branch: Keycloak runtime/providers 26.8.1, LDAP-only
+> membership, sticky required policies, restricted public admin paths and
+> registration validation. See [ADR 0002](docs/decisions/0002-security-decisions.md).
+> Previously published release notes below describe their historical versions.
+
 # ns8-idp-reworked
 
 Veröffentlichte Vorabversion **0.1.0-rc.2**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
@@ -37,10 +42,11 @@ The host root, `https://sso.example.org/`, leads the users to the
 account console of their user domain,
 `https://sso.example.org/realms/<user domain>/account/`, where they
 log in with their domain account. This works when the module has exactly
-one enabled realm. With no realm, or more than one, the host root leads
-to the Keycloak Administration Console, as in upstream Keycloak: no
-public page lists the user domains. The account console of each realm is
-always reachable at its own URL.
+one enabled realm. With no realm, or more than one, the host root shows
+a neutral page that asks to sign in from the application: no public page
+lists the user domains, and the Administration Console is reachable only
+from the node. The account console of each realm is always reachable at
+its own URL.
 
 ## Register an application
 
@@ -136,8 +142,9 @@ still denied. Tokens already issued and application sessions keep their own
 expiry: an application can end them itself, like the Vaultwarden module
 does.
 
-Setting a policy never disables the client. The checks act only on clients
-with the policy attribute, so the required action and the token mapper are
+Setting a policy never disables the client. Clients registered with `access_required:true` also deny access when their
+policy is removed or differs from the pinned group. For optional clients,
+the checks act only on clients with the policy attribute, so the required action and the token mapper are
 put in place first, and one client update then sets the policy: a failure
 leaves the client as it was, unrestricted, or restricted already. Trying
 again completes it.
@@ -277,7 +284,7 @@ Console of the master realm, which has no users of the user domains. A
 theme template cannot read the realms, so the page forwards to the
 `ns8-home` realm resource (`/realms/master/ns8-home`, in the provider
 jar), which redirects to the account console of the only enabled realm
-besides master, or to the Administration Console.
+besides master, or shows the neutral page.
 
 ### Module configuration
 

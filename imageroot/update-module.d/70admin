@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+import os
+from idp_routes import restrict_admin
+if os.getenv('IDP_HOSTNAME'):
+    restrict_admin(os.environ['IDP_HOSTNAME'])
