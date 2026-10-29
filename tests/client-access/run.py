@@ -658,7 +658,7 @@ class LoginTests(unittest.TestCase):
 
     def test_34_host_root(self):
         """The host root leads to the account console of the only enabled
-        user domain realm, otherwise to the Administration Console."""
+        user domain realm, otherwise to a neutral page."""
         home=self.url+'/realms/master/ns8-home'
         page=requests.get(self.url+'/',timeout=20)
         self.assertEqual(page.status_code,200,page.text[-500:])
@@ -675,8 +675,14 @@ class LoginTests(unittest.TestCase):
         self.assertIn('/realms/ad.test/',login.url)
         self.kc.post('',{'realm':'second.test','enabled':True})
         try:
-            # Two realms: no page names the user domains
-            self.assertEqual(target(),self.url+'/admin/')
+            # Two realms: a neutral page names no user domain, and the
+            # Administration Console stays reachable only from the node
+            neutral=requests.get(home,allow_redirects=False,timeout=20)
+            self.assertEqual(neutral.status_code,200,neutral.text[-500:])
+            self.assertIn('no-store',neutral.headers.get('Cache-Control',''))
+            self.assertIn('id="ns8-home"',neutral.text)
+            self.assertNotIn('ad.test',neutral.text)
+            self.assertNotIn('second.test',neutral.text)
             realm=self.kc.get('/second.test')
             realm['enabled']=False
             self.kc.put('/second.test',realm)

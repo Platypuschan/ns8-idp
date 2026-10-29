@@ -103,11 +103,12 @@ def required_action_enabled(kc, realm):
 #
 
 def group_mapper(kc, realm):
-    """Return (storage, mapper): the LDAP federation and its group
-    mapper, if it reads the memberships from LDAP only. Otherwise raise
-    PolicyError."""
+    """Return (storage, mapper): the read-only LDAP federation and its
+    group mapper, if it reads the memberships from LDAP only. Otherwise
+    raise PolicyError. LDAP_ONLY would write memberships to a writable
+    federation."""
     storages = [c for c in kc.get(f"/{realm}/components", params={"type": STORAGE_TYPE})
-        if c.get("providerId") == "ldap"]
+        if c.get("providerId") == "ldap" and c.get("config", {}).get("editMode") == ["READ_ONLY"]]
     if len(storages) != 1:
         raise PolicyError("ldap_federation_not_found")
     mappers = [m for m in kc.get(f"/{realm}/components", params={"parent": storages[0]["id"], "type": GROUP_MAPPER_TYPE})

@@ -74,12 +74,14 @@ public final class GroupAccess {
         }
     }
 
-    /** The memberships come from LDAP only if the user is federated by an
-     * LDAP provider with a read-only group mapper. */
+    /** The memberships come from LDAP only if the user is federated by a
+     * read-only LDAP provider whose group mapper reads them from LDAP only.
+     * LDAP_ONLY writes memberships to LDAP when the federation is writable. */
     private static boolean liveMembership(RealmModel realm, UserModel user) {
         var link = user.getFederationLink();
         ComponentModel federation = link == null ? null : realm.getComponent(link);
         return federation != null && "ldap".equals(federation.getProviderId())
+            && "READ_ONLY".equals(federation.getConfig().getFirst("editMode"))
             && realm.getComponentsStream(federation.getId(),
                 "org.keycloak.storage.ldap.mappers.LDAPStorageMapper")
                 .anyMatch(m -> "group-ldap-mapper".equals(m.getProviderId())

@@ -46,6 +46,25 @@ Source: user decisions P1–P21 in agent-exchange task
 - P16: destructive client cleanup reads current bindings from the leader,
   not a replica. A read error aborts without interpreting it as an unbind.
 
+## Follow-up of the security recheck, 29 October 2026
+
+Source: user decisions R0/R1/R8 and fixes R2–R7 in agent-exchange task
+`20261029-claude-recheck-implementation`.
+
+- R2: keycloak.service allows 600 s to start: the health check (150 s),
+  keycloak-post-start waiting for the model bootstrap (300 s) and its
+  reconciliation. Before, the 180 s limit could stop Keycloak during a slow
+  upgrade although the error of the post-start step itself is ignored.
+- R6: without exactly one enabled user domain realm, the host root shows a
+  neutral page instead of redirecting to /admin/, which P4 restricts to the
+  node.
+- R7: the gate and the policy validation also require a READ_ONLY federation.
+  With LDAP_ONLY, a writable federation would write Keycloak membership
+  changes to LDAP, so Keycloak administrators could grant access.
+- R8: LDAP_ONLY applies to all clients of the realm: local Keycloak group
+  memberships of LDAP users are ignored everywhere. The user grants access to
+  applications with AD groups only (decision of 29 October 2026).
+
 P3 stays open: anti-brute-force work is being planned separately. No limits
 are selected here. P13 full restore testing is deferred by the user. P19 was
 withdrawn; P21 direct membership remains the existing agreed semantics.

@@ -68,9 +68,11 @@ Create the user domain
 No realm before the first registration
     Realm is absent    ${USER_DOMAIN}
 
-The host root leads to the Administration Console without realms
+The host root shows a neutral page without realms
     ${location} =    Host root target
-    Should Be Equal    ${location}    https://${IDP_HOST}/admin/
+    Should Be Empty    ${location}
+    ${page} =    Execute Command    curl -sk --resolve ${IDP_HOST}:443:127.0.0.1 https://${IDP_HOST}/realms/master/ns8-home
+    Should Contain    ${page}    id="ns8-home"
 
 The client owner is required
     &{error} =    Run validation    module/${module_id}/register-client    {"domain": "${USER_DOMAIN}"}

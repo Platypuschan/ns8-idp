@@ -42,10 +42,11 @@ The host root, `https://sso.example.org/`, leads the users to the
 account console of their user domain,
 `https://sso.example.org/realms/<user domain>/account/`, where they
 log in with their domain account. This works when the module has exactly
-one enabled realm. With no realm, or more than one, the host root leads
-to the Keycloak Administration Console, as in upstream Keycloak: no
-public page lists the user domains. The account console of each realm is
-always reachable at its own URL.
+one enabled realm. With no realm, or more than one, the host root shows
+a neutral page that asks to sign in from the application: no public page
+lists the user domains, and the Administration Console is reachable only
+from the node. The account console of each realm is always reachable at
+its own URL.
 
 ## Register an application
 
@@ -283,7 +284,7 @@ Console of the master realm, which has no users of the user domains. A
 theme template cannot read the realms, so the page forwards to the
 `ns8-home` realm resource (`/realms/master/ns8-home`, in the provider
 jar), which redirects to the account console of the only enabled realm
-besides master, or to the Administration Console.
+besides master, or shows the neutral page.
 
 ### Module configuration
 
