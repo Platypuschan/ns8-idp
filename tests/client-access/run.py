@@ -127,7 +127,9 @@ class LoginTests(unittest.TestCase):
         cls.samba = 'vw-ad-' + cls.suffix
         cls.keycloak = 'vw-kc-' + cls.suffix
         cls.names = []
-        cls.password = secrets.token_urlsafe(24) + 'Aa1!'
+        # samba-tool parses a positional password beginning with '-' as an
+        # option. Keep random credentials but always start with a safe prefix.
+        cls.password = 'Aa1!' + secrets.token_urlsafe(24)
         cls.kc_port, cls.vw_port = port(), port()
         cls.url = f'http://127.0.0.1:{cls.kc_port}'
         cls.vw_url = f'http://127.0.0.1:{cls.vw_port}'
@@ -142,8 +144,9 @@ class LoginTests(unittest.TestCase):
         cmd('podman', 'run', '-d', '--name', cls.keycloak, '--network', cls.network,
             '-p', f'127.0.0.1:{cls.kc_port}:8080', '--env', 'KC_BOOTSTRAP_ADMIN_USERNAME',
             '--env', 'KC_BOOTSTRAP_ADMIN_PASSWORD', os.environ.get('IDP_RUNTIME_IMAGE', 'localhost/ns8-idp-client-access-test'),
-            'start-dev', '--db=dev-file', '--features=scripts', '--log-level=INFO,org.nethserver.keycloak.access:DEBUG', '--hostname=' + cls.url,
+            'start-dev', '--db=dev-file', '--features=scripts', '--log-level=INFO,org.nethserver.keycloak.access:DEBUG', '--hostname=' + getattr(cls, 'frontend_url', cls.url),
             '--spi-theme--welcome-theme=ns8',
+            *getattr(cls, 'keycloak_args', []),
             env=env)
         cls.names.append(cls.keycloak)
         wait_http(cls.url + '/realms/master/.well-known/openid-configuration', cls.names)

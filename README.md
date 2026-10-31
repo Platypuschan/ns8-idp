@@ -1,11 +1,6 @@
-> Unreleased security work branch: Keycloak runtime/providers 26.8.1, LDAP-only
-> membership, sticky required policies, restricted public admin paths and
-> registration validation. See [ADR 0002](docs/decisions/0002-security-decisions.md).
-> Previously published release notes below describe their historical versions.
-
 # ns8-idp-reworked
 
-Veröffentlichte Vorabversion **0.1.0-rc.2**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
+Vorabversion **0.1.0-rc.5**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, optionaler Tokenlaufzeit und optionaler [Anmeldung mit Gerätezertifikat](docs/CERTIFICATES.md); keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
 
 [Prüfnachweise und Image-Digests](docs/RELEASE-0.1.0-rc.2.md) ([0.1.0-rc.1](docs/RELEASE-0.1.0-rc.1.md)) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
@@ -400,6 +395,12 @@ takes effect immediately: the core has already reloaded the unit files.
 before it existed.
 
 ## Running tests locally
+
+Optional personal device certificate sign-in is documented in
+[CERTIFICATES.md](docs/CERTIFICATES.md). It includes an administrator-only
+enrollment/revocation page and requires the accompanying NS8 Traefik route API
+extension; the stock proxy cannot enable the feature. The existing password
+login and live LDAP group access policy remain available.
 
 This module uses the NS8 standard testing infrastructure. For instructions on how to run the test suite locally, refer to the [Running tests locally](https://github.com/NethServer/ns8-github-actions/blob/v1/README.md#running-tests-locally) section of the ns8-github-actions README.
 
