@@ -18,6 +18,7 @@ from unittest.mock import Mock
 import jsonschema
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT / 'imageroot/pypkg'))
 spec = importlib.util.spec_from_file_location('cert_module', ROOT / 'imageroot/pypkg/idpcert.py')
 cert = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cert)
