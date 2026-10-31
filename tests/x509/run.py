@@ -122,11 +122,19 @@ class CertificateLogin(fixture.LoginTests):
             except requests.RequestException: pass
             time.sleep(.5)
         else: raise RuntimeError('TLS route did not become ready')
+        cls.create_account_mapper()
         cls.pins = {}
         for username in ('allowed', 'denied'):
             cls.pins[username] = idpcert.enroll(cls.kc, 'ad.test', username, username,
                                                Path(getattr(cls, username)[0]).read_text())
         idpcert.set_enabled(cls.kc, 'ad.test', True, cls.proof)
+
+    @classmethod
+    def create_account_mapper(cls):
+        cls.kc.post('/ad.test/components', {'name': idpcert.ACCOUNT_MAPPER,
+            'providerId': 'user-attribute-ldap-mapper', 'parentId': cls.component['id'],
+            'providerType': 'org.keycloak.storage.ldap.mappers.LDAPStorageMapper',
+            'config': idpcert.account_state_mapper_config(True)})
 
     @classmethod
     def cleanup(cls):
@@ -253,6 +261,36 @@ class CertificateLogin(fixture.LoginTests):
             self.assertIsNone(target)
         finally:
             cmd('podman', 'exec', self.samba, 'samba-tool', 'user', 'enable', 'allowed')
+
+    def test_x509_expired_directory_account(self):
+        def expiry(*args):
+            cmd('podman', 'exec', self.samba, 'samba-tool', 'user', 'setexpiry', 'allowed', *args)
+        try:
+            expiry('--days=30')
+            _, _, target, _ = self.cert_auth(self.allowed)
+            self.assertIn('code=', target or '', 'a future expiry is still valid')
+            expiry('--days=0')
+            time.sleep(1)
+            _, r, target, _ = self.cert_auth(self.allowed)
+            self.assertIsNone(target)
+            self.assertTrue(fixture.Form(r.text).action, 'password form expected')
+        finally:
+            expiry('--noexpiry')
+        _, _, target, _ = self.cert_auth(self.allowed)
+        self.assertIn('code=', target or '')
+
+    def test_x509_unknown_account_state_denies_certificate_login(self):
+        mapper = next(m for m in self.kc.get('/ad.test/components', params={'parent': self.component['id']})
+                      if m['name'] == idpcert.ACCOUNT_MAPPER)
+        self.kc.delete('/ad.test/components/' + mapper['id'])
+        try:
+            _, r, target, _ = self.cert_auth(self.allowed)
+            self.assertIsNone(target)
+            self.assertTrue(fixture.Form(r.text).action, 'password form expected')
+        finally:
+            self.create_account_mapper()
+        _, _, target, _ = self.cert_auth(self.allowed)
+        self.assertIn('code=', target or '')
 
     def test_x509_direct_backend_header_and_identity_rebinding(self):
         # Even another local application knowing a public certificate must not

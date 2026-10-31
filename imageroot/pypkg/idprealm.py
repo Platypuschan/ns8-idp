@@ -20,6 +20,7 @@ import urllib.parse
 
 import agent
 import agent.ldapproxy
+import idpcert
 import kcadmin
 
 LDAP_COMPONENT_NAME = "ns8-ldap"
@@ -228,19 +229,24 @@ def ensure_federation(kc, domain):
         component["config"].update(config)
         kc.put(f"/{domain}/components/{component['id']}", component)
 
+    _ensure_mapper(kc, domain, component["id"], GROUP_MAPPER_NAME, "group-ldap-mapper",
+                   group_mapper_config(domain))
+    _ensure_mapper(kc, domain, component["id"], idpcert.ACCOUNT_MAPPER, "user-attribute-ldap-mapper",
+                   idpcert.account_state_mapper_config(config["vendor"] == ["ad"]))
+
+def _ensure_mapper(kc, domain, parent_id, name, provider_id, config):
     mapper_type = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
-    mapper_config = group_mapper_config(domain)
-    mapper = _find_component(kc, domain, component["id"], mapper_type, GROUP_MAPPER_NAME)
+    mapper = _find_component(kc, domain, parent_id, mapper_type, name)
     if mapper is None:
         kc.post(f"/{domain}/components", {
-            "name": GROUP_MAPPER_NAME,
-            "providerId": "group-ldap-mapper",
+            "name": name,
+            "providerId": provider_id,
             "providerType": mapper_type,
-            "parentId": component["id"],
-            "config": mapper_config,
+            "parentId": parent_id,
+            "config": config,
         })
     else:
-        mapper["config"].update(mapper_config)
+        mapper["config"].update(config)
         kc.put(f"/{domain}/components/{mapper['id']}", mapper)
 
 def ensure_ldap_uuid_scope(kc, domain):

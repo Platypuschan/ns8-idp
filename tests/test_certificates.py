@@ -219,6 +219,13 @@ class CertificateTests(unittest.TestCase):
         self.transport(module, True, 'other.test', True)
         self.assertEqual(len(calls), 2)
 
+    def test_account_state_is_read_live_for_each_directory_schema(self):
+        for active_directory, attribute in ((True, 'accountExpires'), (False, 'pwdAccountLockedTime')):
+            config = cert.account_state_mapper_config(active_directory)
+            self.assertEqual(config['ldap.attribute'], [attribute])
+            self.assertEqual(config['always.read.value.from.ldap'], ['true'])
+            self.assertEqual(config['read.only'], ['true'])
+
     def test_disable_keeps_a_flow_bound_by_an_administrator(self):
         kc = Mock()
         kc.get.return_value = {'browserFlow':'site flow', 'attributes':{cert.ENABLED:'true', cert.PROOF_ATTRIBUTE:'a'*64}}

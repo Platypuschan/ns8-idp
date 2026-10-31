@@ -22,6 +22,20 @@ PROVIDER = 'ns8-device-certificate'
 HEADER = 'X-Forwarded-Tls-Client-Cert'
 PROOF_HEADER = 'X-NS8-X509-Proxy'
 PROOF_ATTRIBUTE = 'ns8.x509.proxy_secret'
+ACCOUNT_MAPPER = 'ns8-account-state'
+ACCOUNT_ATTRIBUTE = 'ns8.account_state'
+
+
+def account_state_mapper_config(active_directory):
+    """Certificate sign-in has no LDAP bind, which is what enforces these
+    states for passwords: read them live. isEnabled() covers ACCOUNTDISABLE."""
+    return {
+        'ldap.attribute': ['accountExpires' if active_directory else 'pwdAccountLockedTime'],
+        'user.model.attribute': [ACCOUNT_ATTRIBUTE],
+        'read.only': ['true'],
+        'always.read.value.from.ldap': ['true'],
+        'is.mandatory.in.ldap': ['false'],
+    }
 
 
 def proxy_secret():

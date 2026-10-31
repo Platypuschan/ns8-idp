@@ -3,15 +3,18 @@ package org.nethserver.keycloak.access;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
+import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.cache.UserCache;
+import org.keycloak.models.utils.StorageUnavailableUserModelDelegate;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.x509.X509ClientCertificateLookup;
@@ -23,6 +26,11 @@ import org.keycloak.util.TokenUtil;
  * attacker-supplied certificate headers. No trust in a certificate's name/CA.
  */
 public final class DeviceCertificate implements Authenticator {
+    private static final String LDAP_MAPPER_TYPE = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper";
+    private static final String ACCOUNT_MAPPER = "ns8-account-state";
+    private static final String ACCOUNT_ATTRIBUTE = "ns8.account_state";
+    private static final long FILETIME_EPOCH_OFFSET_MILLIS = 11_644_473_600_000L;
+
     @Override public void authenticate(AuthenticationFlowContext context) {
         if (!"true".equals(context.getRealm().getAttribute("ns8.x509.enabled"))) {
             context.attempted();
@@ -82,8 +90,10 @@ public final class DeviceCertificate implements Authenticator {
             UserCache cache = session.getProvider(UserCache.class);
             if (cache != null && user != null) cache.evict(realm, user);
             user = session.users().getUserById(realm, userId);
-            if (user == null || !user.isEnabled() || user.getFederationLink() == null
-                    || !pin.get("ldap_id").equals(user.getFirstAttribute("LDAP_ID")))
+            if (user == null || user instanceof StorageUnavailableUserModelDelegate || !user.isEnabled()
+                    || user.getFederationLink() == null
+                    || !pin.get("ldap_id").equals(user.getFirstAttribute("LDAP_ID"))
+                    || !activeInDirectory(realm, user))
                 throw new IllegalArgumentException("Directory identity unavailable");
             context.setUser(user);
             context.getEvent().detail("auth_method", "ns8-device-certificate");
@@ -95,6 +105,29 @@ public final class DeviceCertificate implements Authenticator {
             context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
         }
     }
+    /** Certificate sign-in has no LDAP bind, which rejects these accounts for
+     * passwords. Any lock value counts. Without a live value the state is
+     * unknown, and an unknown state must never read as "not locked". */
+    private static boolean activeInDirectory(RealmModel realm, UserModel user) {
+        ComponentModel federation = realm.getComponent(user.getFederationLink());
+        if (federation == null) return false;
+        boolean activeDirectory = "ad".equals(federation.getConfig().getFirst("vendor"));
+        String attribute = activeDirectory ? "accountExpires" : "pwdAccountLockedTime";
+        boolean live = realm.getComponentsStream(federation.getId(), LDAP_MAPPER_TYPE)
+            .anyMatch(m -> ACCOUNT_MAPPER.equals(m.getName())
+                && attribute.equals(m.getConfig().getFirst("ldap.attribute"))
+                && ACCOUNT_ATTRIBUTE.equals(m.getConfig().getFirst("user.model.attribute"))
+                && "true".equals(m.getConfig().getFirst("always.read.value.from.ldap")));
+        if (!live) return false;
+        String value = user.getFirstAttribute(ACCOUNT_ATTRIBUTE);
+        if (value == null || value.isEmpty()) return true;
+        if (!activeDirectory) return false;
+        // FILETIME: 100 ns ticks since 1601. 0 and Long.MAX_VALUE mean never.
+        long ticks = Long.parseLong(value);
+        return ticks == 0 || ticks == Long.MAX_VALUE
+            || Instant.ofEpochMilli(ticks / 10_000 - FILETIME_EPOCH_OFFSET_MILLIS).isAfter(Instant.now());
+    }
+
     @Override public void action(AuthenticationFlowContext context) { authenticate(context); }
     @Override public boolean requiresUser() { return false; }
     @Override public boolean configuredFor(KeycloakSession session, RealmModel realm, UserModel user) { return true; }

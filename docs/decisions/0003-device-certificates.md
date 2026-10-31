@@ -43,6 +43,17 @@ possession-based login method, **not an additional second factor**: it bypasses
 the password/form branch, including conditional OTP there. Sites requiring MFA
 must not enable it without a reviewed flow enforcing their second factor.
 Required actions and client token gates still check live LDAP_ONLY groups.
+
+Certificate login has no LDAP bind, and that bind is what rejects locked accounts
+for passwords. User decision 2026-10-31: enforce those states live. An
+`ns8-account-state` LDAP mapper, always read from the directory, exposes
+`accountExpires` (AD) or `pwdAccountLockedTime` (OpenLDAP). An expired AD account
+or any lock value denies certificate login, and so does a missing mapper or an
+unreadable value: unknown state never reads as "not locked". The default NS8
+password policy sets no `pwdMaxFailure`, so only administrators set this value. A
+site policy with automatic lockouts would block certificate login as well, until
+a password bind clears the value. AD `lockoutTime` is not read, because it only
+protects passwords from guessing.
 `prompt=login` and an expired `max_age` skip the certificate and show the password
 form: they ask for a new authentication, and this is also the way to use another
 account on an enrolled device. Successful logins record the certificate fingerprint

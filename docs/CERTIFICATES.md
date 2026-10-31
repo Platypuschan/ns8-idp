@@ -60,6 +60,9 @@ Disabling certificate sign-in returns the realm to its standard browser flow
 without deleting enrollments. It prevents new certificate logins, not every
 existing application/IdP session. Password login remains available.
 
+Certificate login respects the directory: a disabled, expired (AD) or locked
+(OpenLDAP) account cannot use it, and the sign-in falls back to the password form.
+
 A realm holds at most 128 certificates. Enabling or disabling makes the IdP address
 unreachable for a few seconds, because the proxy reloads both routes. Applications
 which request `prompt=login` always show the password form; use it to sign in with

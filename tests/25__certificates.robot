@@ -61,6 +61,12 @@ Missing and forged certificates cannot sign in
     Should Be True    ${state.password_form}
     Certificate authorization    forged    ${FALSE}
 
+A locked directory account cannot sign in with its certificate
+    Run task    module/${ldap_module_id}/alter-user    {"user": "u1", "locked": true}    decode_json=${FALSE}
+    Retry test    Certificate authorization    certificate    ${FALSE}
+    Run task    module/${ldap_module_id}/alter-user    {"user": "u1", "locked": false}    decode_json=${FALSE}
+    Retry test    Certificate authorization    certificate    ${TRUE}
+
 Restart and reconfiguration preserve certificate login
     ${rc} =    Execute Command    runagent -m ${module_id} systemctl --user restart keycloak.service
     ...    return_rc=True    return_stdout=False
