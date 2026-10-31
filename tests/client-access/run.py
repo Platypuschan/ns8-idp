@@ -127,7 +127,9 @@ class LoginTests(unittest.TestCase):
         cls.samba = 'vw-ad-' + cls.suffix
         cls.keycloak = 'vw-kc-' + cls.suffix
         cls.names = []
-        cls.password = secrets.token_urlsafe(24) + 'Aa1!'
+        # samba-tool parses a positional password beginning with '-' as an
+        # option. Keep random credentials but always start with a safe prefix.
+        cls.password = 'Aa1!' + secrets.token_urlsafe(24)
         cls.kc_port, cls.vw_port = port(), port()
         cls.url = f'http://127.0.0.1:{cls.kc_port}'
         cls.vw_url = f'http://127.0.0.1:{cls.vw_port}'

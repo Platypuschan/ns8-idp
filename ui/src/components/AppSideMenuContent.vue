@@ -35,7 +35,10 @@
         <template v-slot:nav-icon><UserMultiple20 /></template>
         <span>{{ $t("access.title") }}</span>
       </cv-side-nav-link>
-      <cv-side-nav-link @click="goToAppPage(instanceName, 'certificates')" :class="{ 'current-page': isLinkActive('certificates') }">
+      <cv-side-nav-link
+        @click="goToAppPage(instanceName, 'certificates')"
+        :class="{ 'current-page': isLinkActive('certificates') }"
+      >
         <template v-slot:nav-icon><UserMultiple20 /></template>
         <span>{{ $t("certificates.title") }}</span>
       </cv-side-nav-link>

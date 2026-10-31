@@ -229,6 +229,18 @@ class CertificateLogin(fixture.LoginTests):
         finally:
             self.kc.put('/ad.test', {'attributes':attrs})
 
+    def test_x509_directory_outage_cannot_use_a_cached_user(self):
+        # Check an unrestricted client as well: rejection must not rely only
+        # on the separately tested application group gate.
+        _, _, target, _ = self.cert_auth(self.allowed, client='other1')
+        self.assertIn('code=', target or '')
+        cmd('podman', 'pause', self.samba)
+        try:
+            _, _, target, _ = self.cert_auth(self.allowed, client='other1')
+            self.assertIsNone(target)
+        finally:
+            cmd('podman', 'unpause', self.samba)
+
     def test_x509_revoked_pin_and_cookie(self):
         session, _, target, _ = self.cert_auth(self.allowed)
         self.assertIn('code=', target or '')

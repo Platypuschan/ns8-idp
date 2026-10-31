@@ -28,6 +28,10 @@ Because other local applications may reach that listener, the module generates
 a 256-bit proof in its private state file; Traefik overwrites the proof header
 and Keycloak requires a constant-time match against the realm's administrative
 attribute. A public PEM plus forged headers, remotely or on loopback, is denied.
+The proxy proof necessarily travels through the administrative `set-route`
+tasks and is persisted in Traefik route configuration as well as realm
+attributes. Treat those internal task/configuration records as credentials;
+the public certificate management action never returns the proof.
 Traefik administrators/routeadm modules remain inside the trust boundary: they
 can already redirect routes and intercept authentication. Never publish the
 route API or Keycloak backend to untrusted clients. Never log the proof header.

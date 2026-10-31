@@ -62,6 +62,12 @@ Existing Bitwarden/Firefox accounts, configurations and app data were preserved.
 Fixture APKs, PKCS#12 files, token responses and unsanitized UI dumps are private
 local test material and must not be published as artifacts.
 
+Cleanup completed: the test client certificate/key was removed through Android
+user credentials (the existing WLAN identity was preserved), the separate app
+was uninstalled, only the fixture's ADB reverse mapping was removed, and the
+temporary containers/network and private fixture keys/PKCS#12/APKs/credentials
+were deleted. No existing application account or server setting was changed.
+
 ## CI and limitations
 
 [Initial protocol CI](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199047571)
