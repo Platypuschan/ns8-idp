@@ -396,6 +396,8 @@ before it existed.
 
 ## Running tests locally
 
+Site policies (admin console, group memberships, host root, client addresses) are switched on the Settings page, see [ADR 0004](docs/decisions/0004-site-policies.md).
+
 Optional personal device certificate sign-in is documented in
 [CERTIFICATES.md](docs/CERTIFICATES.md). It includes an administrator-only
 enrollment/revocation page and requires the accompanying NS8 Traefik route API
