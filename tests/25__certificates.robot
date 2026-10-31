@@ -52,6 +52,7 @@ Enroll the domain user and enable certificate login
     Run task    module/${module_id}/alter-certificates    {"domain": "${USER_DOMAIN}", "operation": "enable"}    decode_json=${FALSE}
     &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
     Should Be True    ${state.enabled}
+    Should Be True    ${state.operational}
     Set Suite Variable    ${DEVICE_FINGERPRINT}    ${state.certificates[0]['fingerprint']}
     Retry test    Certificate authorization    certificate    ${TRUE}
 
@@ -67,6 +68,8 @@ Restart and reconfiguration preserve certificate login
     Retry test    Certificate authorization    certificate    ${TRUE}
     Run task    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false}    decode_json=${FALSE}
     Retry test    Certificate authorization    certificate    ${TRUE}
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Be True    ${state.operational}
 
 Revoke and disable certificate login
     Run task    module/${module_id}/alter-certificates    {"domain": "${USER_DOMAIN}", "operation": "revoke", "fingerprint": "${DEVICE_FINGERPRINT}"}    decode_json=${FALSE}

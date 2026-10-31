@@ -4,6 +4,20 @@ Task: `20261031-codex-x509-login`. [PR19](https://github.com/Platypuschan/ns8-id
 Tested production source: **6293ac8dec68686767035132ba95d03d6235770d**.
 No production installation, main branch or release tag was changed.
 
+## Review fixes, 2026-10-31
+
+Task: `20261031-claude-x509-review-fixes`. Changes since the source above: parallel
+route writes with rollback, stop on an unreadable route, re-authentication via
+the password form, `operational` state, disable with a site flow, no-op
+reconciliation. Evidence at 3dfe3cba7319dff10063b074630420c3329b1775:
+[candidate 41209570588](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41209570588)
+Debian13 and Rocky9 39 passed / one expected skip each, with the companion proxy;
+[protocol 41209569597](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41209569597)
+unit 38 passed / one skip, legacy suites 17+6+8, TLS suite 9 including `prompt=login`
+and `max_age`. Not measured: the duration of the hostname outage while enabling.
+`lets_encrypt=true` stays untested, and the Android evidence below predates these
+changes. The Java change only adds a skip before certificate handling.
+
 ## CI on real NS8
 
 [Final candidate 41201701011](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41201701011)
