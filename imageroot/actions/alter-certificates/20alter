@@ -22,8 +22,14 @@ with idprealm.realms_lock():
             idpcert.revoke(kc, domain, request['fingerprint'])
         elif operation == 'enable':
             # Transport must work before the realm accepts certificates.
+            already_active = any(idpcert.enabled(kc.get('/' + idpcert.path(r))) for r in realms)
             certificate_transport(True)
-            idpcert.set_enabled(kc, domain, True, idpcert.proxy_secret())
+            try:
+                idpcert.set_enabled(kc, domain, True, idpcert.proxy_secret())
+            except Exception:
+                if not already_active:
+                    certificate_transport(False)
+                raise
         elif operation == 'disable':
             # Remove trust first. Other realms may still need the transport.
             idpcert.set_enabled(kc, domain, False)

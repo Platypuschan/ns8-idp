@@ -123,7 +123,12 @@ def revoke(kc, realm, fingerprint):
     # Retain a denied tombstone until logout succeeds, so a failed logout is
     # visible and retryable without ever restoring the credential.
     kc.put(base, {'attributes': attrs})
-    kc.post(base + '/users/' + path(record['user_id']) + '/logout')
+    try:
+        kc.post(base + '/users/' + path(record['user_id']) + '/logout')
+    except Exception as exc:
+        # A deleted directory/Keycloak user has no session to terminate.
+        if getattr(exc, 'status', None) != 404:
+            raise
     del attrs[PREFIX + fingerprint]
     kc.put(base, {'attributes': attrs})
 
