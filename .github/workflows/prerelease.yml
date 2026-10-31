@@ -71,7 +71,7 @@ jobs:
       version_tag: ${{ needs.build.outputs.candidate }}
       install_args: ghcr.io/nethserver/core:3.23.2
       script: ${{ matrix.bootstrap && 'tests/ns8/bootstrap-rocky.sh' || '' }}
-      args: ${{ matrix.bootstrap && needs.build.outputs.image || '-v SCENARIO:install' }}
+      args: ${{ matrix.bootstrap && needs.build.outputs.image || '-v SCENARIO:install -v CERTIFICATE_TRANSPORT_TEST:True' }}
   publish:
     if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
     needs: [build, qemu]

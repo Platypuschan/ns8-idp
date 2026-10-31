@@ -34,4 +34,4 @@ runner_script="$(mktemp)"
 trap 'unlink "$runner_script"' EXIT
 curl -fsSL --retry 3 -o "$runner_script" https://raw.githubusercontent.com/NethServer/ns8-github-actions/3dc3a490752846c4cb0ea86921f8ae3790d7d78c/scripts/test-module.sh
 printf '%s  %s\n' '75dd542b81bac8cfe7048e59b438a02abae5eabe954dfdb6263e95e6b6d77be7' "$runner_script" | sha256sum -c -
-bash "$runner_script" "$leader" "$image" -v SCENARIO:install
+bash "$runner_script" "$leader" "$image" -v SCENARIO:install -v CERTIFICATE_TRANSPORT_TEST:True

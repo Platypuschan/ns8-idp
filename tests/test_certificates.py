@@ -1,16 +1,20 @@
 """Credential input, immutable identity and transport capability boundaries."""
 import copy
+import contextlib
 import importlib.util
 import json
 import os
+import io
 from pathlib import Path
 import ssl
+import runpy
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
 import jsonschema
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +88,36 @@ class CertificateTests(unittest.TestCase):
         cert.revoke(kc, 'ad.test', record['fingerprint'])
         self.assertFalse(cert.records(kc.rep))
         self.assertEqual(kc.rep['attributes'], {'unrelated': 'keep'})
+
+    def test_deleted_user_does_not_prevent_certificate_removal(self):
+        kc = FakeKC()
+        record = cert.enroll(kc, 'ad.test', 'alice', 'tablet', self.pem)
+        missing = RuntimeError('user removed')
+        missing.status = 404
+        kc.post = Mock(side_effect=missing)
+        cert.revoke(kc, 'ad.test', record['fingerprint'])
+        self.assertFalse(cert.records(kc.rep))
+
+    def test_custom_flow_rejection_rolls_back_new_transport(self):
+        kc = FakeKC()
+        kc.rep['browserFlow'] = 'site-specific-mfa'
+        realm = types.ModuleType('idprealm')
+        realm.require_keycloak = lambda: None
+        realm.realms_lock = contextlib.nullcontext
+        realm.fail_validation = Mock(side_effect=SystemExit(2))
+        admin = types.ModuleType('kcadmin')
+        admin.agent_client = lambda: kc
+        admin.managed_realms = lambda client: ['ad.test']
+        routes = types.ModuleType('idp_routes')
+        routes.certificate_transport = Mock()
+        request = io.StringIO(json.dumps({'domain':'ad.test', 'operation':'enable'}))
+        with patch.dict(sys.modules, {'idpcert':cert, 'idprealm':realm, 'kcadmin':admin, 'idp_routes':routes}), \
+                patch.object(cert, 'proxy_secret', return_value='a'*64), patch.object(sys, 'stdin', request), \
+                self.assertRaises(SystemExit):
+            runpy.run_path(str(ROOT/'imageroot/actions/alter-certificates/20alter'), run_name='__main__')
+        self.assertEqual([call.args for call in routes.certificate_transport.call_args_list], [(True,), (False,)])
+        self.assertFalse(cert.enabled(kc.rep))
+        realm.fail_validation.assert_called_once_with('operation', 'enable', 'custom_browser_flow')
 
     def test_actions_reject_incomplete_operations_and_bad_fingerprints(self):
         schema = json.loads((ROOT/'imageroot/actions/alter-certificates/validate-input.json').read_text())
