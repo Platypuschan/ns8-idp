@@ -129,11 +129,17 @@ class CertificateTests(unittest.TestCase):
 
     def test_stock_traefik_cannot_silently_enable_certificate_login(self):
         original = {'idp1': {'instance':'idp1','host':'sso.test','url':'http://127.0.0.1:1234','http2https':True},
-                    'idp1-admin': {'instance':'idp1-admin','host':'sso.test','url':'http://127.0.0.1:1234','path':'/admin'}}
+                    'idp1-admin': {'instance':'idp1-admin','host':'sso.test','url':'http://127.0.0.1:1234','path':'/admin',
+                                   'http2https':True,'ip_allowlist':['127.0.0.1/32','::1/128']}}
         for supported in (False, True):
             routes = copy.deepcopy(original)
             agent = types.ModuleType('agent')
-            agent.get_route = lambda instance: copy.deepcopy(routes.get(instance, {}))
+            def get_route(instance):
+                result = copy.deepcopy(routes.get(instance, {}))
+                if supported and not all(r.get('client_certificates') for r in routes.values()):
+                    result['client_certificates'] = False
+                return result
+            agent.get_route = get_route
             def set_route(data):
                 routes[data['instance']].update(copy.deepcopy(data))
                 if not supported: routes[data['instance']].pop('client_certificates', None)
@@ -151,6 +157,8 @@ class CertificateTests(unittest.TestCase):
                     self.assertTrue(all(r['headers']['request'][cert.HEADER] == '' for r in routes.values()))
                     self.assertEqual(routes['idp1-admin']['ip_allowlist'], ['127.0.0.1/32','::1/128'])
                 else:
+                    # No wall-clock wait for a deliberately unsupported API.
+                    module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
                     with self.assertRaisesRegex(cert.CertificateError, 'traefik_certificate_support_required'):
                         module.certificate_transport(True)
                     self.assertEqual(routes, original)

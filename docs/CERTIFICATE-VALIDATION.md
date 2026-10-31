@@ -86,3 +86,23 @@ follow-up candidate finishes; no green QEMU result is claimed here in advance.
 Full NS8 backup/restore and production deployment remain outside this evidence.
 The stock NS8 proxy still requires the reviewed companion capability patch
 before certificate sign-in can be enabled in an installation.
+
+## SNI transition regression found by the full NS8 suite
+
+The baseline candidate at `6abef98f726490e68b88f3f6ec3b2d1710047111`
+[41199461063](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199461063)
+passed on both Debian13/Rocky9: 34 passed / one existing expected skip.
+The expanded companion-proxy suite
+[41200177226](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41200177226)
+then exposed an activation failure on the actual NS8 Traefik **3.7.15**:
+conflicting host/admin TLS options temporarily remove both routers from the
+effective API (404), while the implementation checked the first route before
+updating the second. This is a real integration defect, not a green full result.
+
+The correction snapshots both complete routes before changing either, deep
+copies their settings, updates both and only then waits for joint capability
+confirmation. The local suite is pinned to the exact observed Traefik 3.7.15
+digest and now checks effective API disappearance/recovery during the conflict.
+All eight TLS/Keycloak/AD cases and 32 unit/action cases + one expected skip pass
+with this correction, including cached-user rejection during LDAP outage. The
+expanded NS8 suite is rerun before claiming full integration success.

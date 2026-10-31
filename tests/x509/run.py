@@ -86,7 +86,7 @@ class CertificateLogin(fixture.LoginTests):
         cls.temp = tempfile.TemporaryDirectory(prefix='ns8-x509-')
         cls.folder = Path(cls.temp.name)
         cls.folder.chmod(0o700)
-        cls.tls_port, cls.http_port = port(), port()
+        cls.tls_port, cls.http_port, cls.api_port = port(), port(), port()
         cls.frontend_url = f'https://localhost:{cls.tls_port}'
         cls.keycloak_args = ['--spi-x509cert-lookup--provider=traefik']
         cls.proof = secrets.token_hex(32)
@@ -108,9 +108,10 @@ class CertificateLogin(fixture.LoginTests):
         cls.proxy = 'x509-proxy-' + cls.suffix
         cmd('podman', 'run', '-d', '--name', cls.proxy, '--network', 'host',
             '-v', str(cls.folder) + ':/fixture:ro,Z',
-            os.environ.get('TRAEFIK_TEST_IMAGE', 'docker.io/library/traefik:v3.6.1@sha256:2ba9a6e99daf342de4268279e3f90cdfc1f9d33349b04384be145247a1ef3871'),
+            os.environ.get('TRAEFIK_TEST_IMAGE', 'docker.io/library/traefik:v3.7.15@sha256:10cc4f33663c9d71049b71775d0b2ac67c18f7ade489ce9d826acc292d7eb82a'),
             '--entrypoints.http.address=127.0.0.1:' + str(cls.http_port),
             '--entrypoints.https.address=127.0.0.1:' + str(cls.tls_port),
+            '--entrypoints.traefik.address=127.0.0.1:' + str(cls.api_port), '--api.insecure=true',
             '--providers.file.directory=/fixture/configs', '--providers.file.watch=true', '--log.level=INFO')
         cls.names.append(cls.proxy)
         # Requests must verify the actual server cert, never verify=False.
@@ -186,6 +187,36 @@ class CertificateLogin(fixture.LoginTests):
         # An attacker with their own TLS key cannot replace it with a victim PEM.
         _, _, target, _ = self.cert_auth(self.unknown, headers={'X-Forwarded-Tls-Client-Cert': quote(forged)})
         self.assertIsNone(target)
+
+    def test_x509_proxy_api_roundtrip_after_sni_conflict(self):
+        # Traefik 3.7 removes conflicting host routers from its effective API.
+        # A sequential NS8 update must configure BOTH before checking either.
+        base = f'http://127.0.0.1:{self.api_port}/api/http/routers/'
+        for name in ('idp-https', 'idp-admin-https'):
+            r = requests.get(base + name + '@file', timeout=5)
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.json()['tls']['options'], 'ns8-client-certificates@file')
+        file = self.folder / 'configs/idp-admin.yml'
+        saved = file.read_text()
+        data = yaml.safe_load(saved)
+        data['http']['routers']['idp-admin-https']['tls'].pop('options')
+        try:
+            file.write_text(yaml.safe_dump(data))
+            for _ in range(40):
+                if requests.get(base + 'idp-https@file', timeout=5).status_code == 404:
+                    break
+                time.sleep(.2)
+            else:
+                self.fail('Expected effective router removal during conflicting SNI options')
+        finally:
+            file.write_text(saved)
+            for _ in range(40):
+                if all(requests.get(base + name + '@file', timeout=5).status_code == 200
+                       for name in ('idp-https', 'idp-admin-https')):
+                    break
+                time.sleep(.2)
+            else:
+                self.fail('Both host routes must recover after matching TLS options')
 
     def test_x509_group_and_disabled_user(self):
         _, r, target, _ = self.cert_auth(self.denied)

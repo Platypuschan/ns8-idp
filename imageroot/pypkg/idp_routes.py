@@ -1,5 +1,7 @@
 """Keep the internal Keycloak admin API off the public host route."""
 import os
+import copy
+import time
 import agent
 import idpcert
 
@@ -21,26 +23,33 @@ def certificate_transport(value, host=None, lets_encrypt=None):
     host = host or os.environ['IDP_HOSTNAME']
     original = []
     try:
-        for suffix in ('', '-admin'):
-            instance = os.environ['MODULE_ID'] + suffix
-            old = agent.get_route(instance)
-            original.append((instance, old))
-            route = dict(old)
+        original = [(os.environ['MODULE_ID'] + suffix,
+                     agent.get_route(os.environ['MODULE_ID'] + suffix))
+                    for suffix in ('', '-admin')]
+        for index, (instance, old) in enumerate(original):
+            route = copy.deepcopy(old)
             route.update(instance=instance, host=host,
                          url='http://127.0.0.1:' + os.environ['TCP_PORT'],
                          http2https=True, client_certificates=value)
             if lets_encrypt is not None:
                 route['lets_encrypt'] = lets_encrypt
-            if suffix:
+            if index:
                 route.update(path='/admin', ip_allowlist=['127.0.0.1/32', '::1/128'])
             headers = route.setdefault('headers', {}).setdefault('request', {})
             headers[idpcert.HEADER] = ''
             headers['X-Forwarded-Tls-Client-Cert-Info'] = ''
             headers[idpcert.PROOF_HEADER] = idpcert.proxy_secret() if value else ''
             agent.set_route(route)
-            acknowledged = agent.get_route(instance)
-            if value and acknowledged.get('client_certificates') is not True:
-                raise idpcert.CertificateError('traefik_certificate_support_required')
+        if value:
+            # SNI precedes HTTP routing. While only one router has changed,
+            # Traefik resolves conflicting TLS options to its defaults. Apply
+            # both first, then check their effective capability together.
+            deadline = time.monotonic() + 10
+            while not all(agent.get_route(instance).get('client_certificates') is True
+                          for instance, _ in original):
+                if time.monotonic() >= deadline:
+                    raise idpcert.CertificateError('traefik_certificate_support_required')
+                time.sleep(.2)
     except Exception:
         for instance, old in reversed(original):
             if old:
