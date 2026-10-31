@@ -134,7 +134,7 @@ class CertificateLogin(fixture.LoginTests):
             # A private local fixture for Android; never send these credentials
             # to test logs or GitHub artifacts.
             private = cls.folder / 'android-fixture.json'
-            private.write_text(json.dumps({'url': cls.frontend_url, 'port': cls.tls_port,
+            private.write_text(json.dumps({'fixture_kind': 'ns8-x509', 'url': cls.frontend_url, 'port': cls.tls_port,
                 'keycloak': cls.keycloak, 'samba': cls.samba, 'proxy': cls.proxy,
                 'admin_url': cls.url, 'password': cls.password, 'network': cls.network}))
             private.chmod(0o600)

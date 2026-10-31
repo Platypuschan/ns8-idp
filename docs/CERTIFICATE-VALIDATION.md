@@ -1,108 +1,117 @@
 # Certificate authentication validation, 2026-10-31
 
-Implementation task: `20261031-codex-x509-login`. No production service was
-reconfigured. The companion proxy change is a source patch, not an installed
-replacement for stock NS8 Traefik.
+Task: `20261031-codex-x509-login`. [PR19](https://github.com/Platypuschan/ns8-idp-reworked/pull/19).
+Tested production source: **6293ac8dec68686767035132ba95d03d6235770d**.
+No production installation, main branch or release tag was changed.
 
-## Local protocol and build evidence
+## CI on real NS8
 
-At implementation commit `72652cf5ce5035e2acab8c5e83d0e7c562f1a591`:
+[Final candidate 41201701011](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41201701011)
+passed at the tested source above: build, Debian13 and Rocky9, **39 passed /
+one existing expected skip per distribution**. Core 3.23.2, Keycloak 26.8.1,
+actual NS8 Traefik runtime 3.7.15. Publication was explicitly disabled.
 
-- 31 unit/action cases, 30 passed and one existing expected skip.
-- Existing real Keycloak/Samba suites: 17 client-access, 6 failure, 8 security
-  decision cases passed.
-- 6 new real TLS/Traefik/Keycloak/Samba cases passed. These use the actual
-  patched NS8 route writer, coexisting root/admin routers, the pinned Keycloak
-  26.8.1 provider and Traefik 3.6.1 digest pinned in the test driver.
-- Certificate key possession; unknown/expired/revoked credentials; forged
-  certificate headers over TLS and directly on loopback; mismatched LDAP
-  identity; AD account disablement/group removal; SSO-cookie logout; password
-  fallback; feature disablement; persistent pins/flow after restart covered.
-- Full UI build, module image build and optimized Keycloak image build passed.
-  `show-config` confirms persisted Traefik lookup provider / PostgreSQL / scripts.
-- NS8 Robot suite dryrun: 36/36. This is syntax/control-flow validation, not a
-  live NS8 result. New real NS8 cases enroll/revoke an OpenLDAP user's public
-  certificate and check stock-proxy capability rejection with password fallback.
+The standard suite first verifies the unmodified stock proxy refuses certificate
+enablement while ordinary login keeps working. The dedicated companion suite
+then installs the four checksum-verified, patched upstream source files only in
+the disposable `ns8-ci` guest and verifies:
 
-Follow-up `6abef98` preserves rollback on browser-flow failure, allows removal
-of a deleted user's denied certificate tombstone and adds the CI-only Rocky
-bootstrap described below. Unit/action cases rerun: 30 passed / 1 expected skip.
-No Java or authentication-transport changes in that follow-up.
+- public certificate enrollment for an existing OpenLDAP user, live app group
+  policy and optional realm-flow activation;
+- actual HTTPS certificate login through NS8 Traefik and the optimized Keycloak;
+- missing/forged certificate headers cannot sign in;
+- existing enrollment and login survive Keycloak restart and module reconfiguration;
+- certificate revocation and feature disablement restore password-only fallback;
+- realm/module removal and the existing installation/security checks.
+
+The companion patch is a reviewed source change in `integrations/ns8-traefik`,
+**not an installed replacement for stock NS8 Traefik**. Production enablement
+requires deploying that capability separately.
+
+Rocky's default NethServer BaseOS mirror returned HTTP404 for advertised metadata
+in [initial candidate 41199046354](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199046354).
+The final CI uses `tests/ns8/bootstrap-rocky.sh`: pinned/checksummed NS8 installer,
+Core 3.23.2, official Rocky repositories with signature verification and a pinned,
+checksummed shared module test runner. This affects only the disposable guest;
+no installed module or production OS repository is changed.
+
+## Protocol, unit and build evidence
+
+[Protocol CI 41201704799](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41201704799)
+passed at the same tested commit:
+
+- 33 unit/action cases: **32 passed, one existing expected skip**;
+- existing real Keycloak/Samba suites: **17 client-access, 6 failure and 8 security
+  decision cases**, all passed;
+- **8 real TLS/Traefik 3.7.15/Keycloak/Samba cases**, all passed;
+- local full UI/module/optimized runtime builds passed; UI formatting warnings
+  corrected. Optimized configuration confirms the persisted Traefik lookup
+  provider, PostgreSQL and scripts. Robot dryrun: 41/41.
+
+TLS cases check key possession, unknown/expired/revoked credentials, forged
+headers over TLS and directly on loopback, immutable directory identity,
+disabled AD users, group removal, SSO-cookie invalidation, password fallback,
+feature disablement and restart persistence. An unrestricted client also rejects
+certificate authentication during LDAP outage after a previously cached login.
+
+The full NS8 suite caught a real activation defect in
+[candidate 41200177226](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41200177226):
+Traefik 3.7.15 removes both host routers from the effective API while their SNI
+TLS options conflict. The initial code checked the host route before updating
+`/admin`. The tested correction snapshots both complete routes before changing
+anything, deep copies settings, applies both and only then confirms capability.
+A real API disappearance/recovery regression and an action-boundary regression
+now cover this behavior. The final NS8 suite above passes that corrected path.
 
 ## Physical Android L8
 
 ADB shell and app installation verified on PRITOM L8 / L8_B02, Android 13.
-Chrome **156.0.8078.73**, system WebView **156.0.8078.47**. A dedicated disposable
-`org.nethserver.x509test` app was built from `tests/x509/android/`, rather than
-changing an existing app's accounts or server configuration.
+Chrome **156.0.8078.73**, system WebView **156.0.8078.47**. A separate disposable
+`org.nethserver.x509test` app exercised native OIDC/S256 PKCE without changing
+existing applications' accounts or server settings.
 
-The isolated fixture has Samba AD, the candidate Keycloak provider, real
-Traefik TLS and a public native OIDC client with S256 PKCE and live AD group
-access policy. Only loopback listeners are published; `adb reverse` connects
-the tablet's localhost to that fixture. A test-only self-signed client identity
-is imported through Android's normal **VPN and apps** installer. Its private
-key never enters an NS8 action or repository. No global server CA is installed;
-Chrome's self-signed-server warning is accepted only for the local fixture;
-the test app independently pins that exact server certificate for token calls.
+The physical fixture used the same Java authenticator (source 72652cf), Samba
+AD, real Traefik TLS (3.6.1 at that time) and a public native OIDC client with
+live AD group policy. Follow-up server protocol and NS8 tests above use the
+actual NS8 Traefik 3.7.15. Only loopback listeners were published; an explicit
+ADB reverse mapping connected the tablet to that isolated fixture.
 
-Observed on the physical device, without entering an IdP username/password:
+A test client identity was imported through Android's normal **VPN and apps**
+installer. No global server CA was installed. Chrome's self-signed-server
+exception was restricted to localhost; the native token request and WebView
+independently pin the exact fixture server certificate.
 
-| Flow | Result |
+| Physical flow | Observed result |
 |---|---|
-| Chrome → native custom-scheme callback → PKCE token exchange | `OIDC PKCE TOKEN SUCCESS` |
-| Chrome Custom Tab → native callback → PKCE token exchange | `OIDC PKCE TOKEN SUCCESS` |
-| Embedded WebView implementing Android KeyChain callback | System certificate picker, then `OIDC PKCE TOKEN SUCCESS` |
-| Remove test user from the app's AD group, repeat Custom Tab login | `accessDenied`; no successful callback/token |
-| Restore AD group, revoke enrolled device pin and IdP sessions, repeat | Username/password form; certificate alone no longer signs in |
+| Chrome → native custom-scheme callback → PKCE exchange | `OIDC PKCE TOKEN SUCCESS` |
+| Chrome Custom Tab → native callback → PKCE exchange | `OIDC PKCE TOKEN SUCCESS` |
+| WebView implementing Android KeyChain callback | System certificate picker, then `OIDC PKCE TOKEN SUCCESS` |
+| Remove test user from app AD group, repeat Custom Tab login | `accessDenied`; no successful callback/token |
+| Restore group, revoke device pin and IdP sessions, repeat | Password form; certificate alone no longer signs in |
 
 These are native OIDC integration tests, **not a complete Bitwarden app login**
-and not a test of vault unlock/biometrics. Embedded WebViews without a
-`ClientCertRequest`/KeyChain implementation are not covered or assumed to work.
-Existing Bitwarden/Firefox accounts, configurations and app data were preserved.
-Fixture APKs, PKCS#12 files, token responses and unsanitized UI dumps are private
-local test material and must not be published as artifacts.
+or vault-unlock/biometric test. WebViews without a ClientCertRequest/KeyChain
+implementation are not assumed to work. Existing Bitwarden/Firefox accounts,
+configuration and application data were preserved.
 
-Cleanup completed: the test client certificate/key was removed through Android
-user credentials (the existing WLAN identity was preserved), the separate app
-was uninstalled, only the fixture's ADB reverse mapping was removed, and the
-temporary containers/network and private fixture keys/PKCS#12/APKs/credentials
-were deleted. No existing application account or server setting was changed.
+Cleanup completed: only the test client identity was removed from Android user
+credentials (the existing WLAN identity was preserved), the separate app was
+uninstalled and only the test ADB reverse mapping was removed. Temporary
+containers/network, private keys, PKCS#12 files, APKs and fixture credentials were
+removed. Reproduction helpers are in `tests/x509/android/README.md`; their native
+client preparation and scoped local cleanup were also executed successfully.
+Never publish fixture APKs/keys, token responses or raw UI dumps.
 
-## CI and limitations
+## Limits and rollout state
 
-[Initial protocol CI](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199047571)
-passed at `72652cf`. The first candidate
-[41199046354](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199046354)
-built successfully, but Rocky failed before module testing: NethServer's BaseOS
-mirror advertised metadata files returning HTTP 404. This repeats the verified
-Vaultwarden rc.8 CI infrastructure failure, not an authentication failure.
+No main merge, RC/stable release or user-instance rollout. The companion proxy
+capability is required; merely updating the IdP module cannot enable stock
+Traefik's missing API feature. Certificate authentication replaces the
+password/form-OTP branch rather than adding a second factor. Revocation ends
+IdP sessions; existing app sessions/tokens and offline data keep their own rules.
 
-`tests/ns8/bootstrap-rocky.sh` uses a pinned/checksummed NS8 installer, Core
-3.23.2, official Rocky packages with signature checking and the pinned/shared
-module test runner inside the disposable VM. It changes no installed module or
-production OS repositories. Final NS8/CI results are to be recorded after the
-follow-up candidate finishes; no green QEMU result is claimed here in advance.
-
-Full NS8 backup/restore and production deployment remain outside this evidence.
-The stock NS8 proxy still requires the reviewed companion capability patch
-before certificate sign-in can be enabled in an installation.
-
-## SNI transition regression found by the full NS8 suite
-
-The baseline candidate at `6abef98f726490e68b88f3f6ec3b2d1710047111`
-[41199461063](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41199461063)
-passed on both Debian13/Rocky9: 34 passed / one existing expected skip.
-The expanded companion-proxy suite
-[41200177226](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41200177226)
-then exposed an activation failure on the actual NS8 Traefik **3.7.15**:
-conflicting host/admin TLS options temporarily remove both routers from the
-effective API (404), while the implementation checked the first route before
-updating the second. This is a real integration defect, not a green full result.
-
-The correction snapshots both complete routes before changing either, deep
-copies their settings, updates both and only then waits for joint capability
-confirmation. The local suite is pinned to the exact observed Traefik 3.7.15
-digest and now checks effective API disappearance/recovery during the conflict.
-All eight TLS/Keycloak/AD cases and 32 unit/action cases + one expected skip pass
-with this correction, including cached-user rejection during LDAP outage. The
-expanded NS8 suite is rerun before claiming full integration success.
+A genuine update from an existing rc.4 installation and full NS8 backup/restore
+were not executed in this task. The inherited install-scenario upgrade test is
+the explicitly reported skip. Restart, reconfiguration, disablement, persistence
+and removal were tested as described above. Final documentation/development
+helper changes after the tested source do not change production code.
