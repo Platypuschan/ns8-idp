@@ -402,3 +402,22 @@ To setup the translation process:
 
 - add [GitHub Weblate app](https://docs.weblate.org/en/latest/admin/continuous.html#github-setup) to your repository
 - add your repository to [hosted.weblate.org](https://hosted.weblate.org) or ask a NethServer developer to add it to ns8 Weblate project
+
+## Site policies
+
+The Settings page, and `configure-module`, offer four optional policies. They are all off by default:
+
+- `restrict_admin_console`: allow the Keycloak admin console from the node only.
+- `directory_groups_only`: ignore local Keycloak group memberships. Client access rules need it, and it has no effect while a realm has a writable federation.
+- `account_home_redirect`: lead the host root to the account page instead of the admin console.
+- `strict_client_uris`: accept only exact HTTPS or native client addresses at registration.
+
+An omitted field keeps its value.
+
+## Client access rules
+
+See [docs/CLIENT-ACCESS.md](docs/CLIENT-ACCESS.md).
+
+## Device certificates
+
+Optional personal device certificate sign-in is documented in [docs/CERTIFICATES.md](docs/CERTIFICATES.md). It needs the `client_certificates` capability of `ns8-traefik`.

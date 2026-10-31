@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Nethesis S.r.l.
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+import json
+import os
+import sys
+
+import agent.ldapproxy
+from agent.ldapclient import Ldapclient, LdapclientEntryNotFound
+import idpaccess
+import idprealm
+import kcadmin
+
+request = json.load(sys.stdin)
+domain = request["domain"]
+
+# A module reads the policy of its own client only. Administrators, for
+# example from the UI or with api-cli, pass client_id.
+task_user = os.getenv("AGENT_TASK_USER", "")
+if task_user.startswith("module/"):
+    if "client_id" in request:
+        idprealm.fail_validation("client_id", request["client_id"], "client_id_not_allowed")
+    if "user" in request:
+        # Memberships of other users are not disclosed to modules
+        idprealm.fail_validation("user", request["user"], "user_not_allowed")
+    client_id = task_user.removeprefix("module/")
+elif "client_id" in request:
+    client_id = request["client_id"]
+else:
+    idprealm.fail_validation("client_id", "", "client_id_required")
+if "user" in request and not request.get("live"):
+    idprealm.fail_validation("user", request["user"], "user_requires_live")
+
+idprealm.require_keycloak()
+kc = kcadmin.agent_client()
+if domain not in kcadmin.managed_realms(kc):
+    idprealm.fail_validation("domain", domain, "realm_not_found")
+client = next((c for c in idprealm.module_clients(kc, domain) if c["clientId"] == client_id), None)
+if client is None:
+    idprealm.fail_validation("client_id", client_id, "client_not_found")
+
+state = idpaccess.access_state(kc, domain, client)
+state["enabled"] = client.get("enabled", True)
+attributes = client.get("attributes") or {}
+state["policy_consumer_bound"] = attributes.get("ns8.access_group_binding") == "consumer"
+state["policy_required"] = attributes.get("ns8.access_required") == "true"
+state["policy_group_pinned"] = bool(attributes.get("ns8.access_group_id")) and attributes.get("ns8.access_group_id") == attributes.get("ns8.access_expected_group_id")
+
+if request.get("live"):
+    def group_exists(name):
+        ldom = agent.ldapproxy.Ldapproxy().get_domain(domain)
+        try:
+            Ldapclient.factory(**ldom).get_group(name)
+        except LdapclientEntryNotFound:
+            return False
+        return True
+    state["live"] = idpaccess.live_state(kc, domain, client, group_exists, request.get("user"))
+
+json.dump(state, fp=sys.stdout)

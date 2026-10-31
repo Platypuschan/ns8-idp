@@ -68,6 +68,12 @@ Create the user domain
 No realm before the first registration
     Realm is absent    ${USER_DOMAIN}
 
+The host root shows a neutral page without realms
+    ${location} =    Host root target
+    Should Be Empty    ${location}
+    ${page} =    Execute Command    curl -sk --resolve ${IDP_HOST}:443:127.0.0.1 https://${IDP_HOST}/realms/master/ns8-home
+    Should Contain    ${page}    id="ns8-home"
+
 The client owner is required
     &{error} =    Run validation    module/${module_id}/register-client    {"domain": "${USER_DOMAIN}"}
     Should Be Equal    ${error.error}    module_id_required
@@ -90,6 +96,10 @@ Register a client creates the realm
     &{realm} =    Realm    ${USER_DOMAIN}
     Should Be True    ${realm.enabled}
     Should Be True    ${realm.user_domain_found}
+
+The host root leads to the account console of the realm
+    ${location} =    Host root target
+    Should Be Equal    ${location}    https://${IDP_HOST}/realms/${USER_DOMAIN}/account/
 
 The federation imports users and groups
     &{result} =    Run kccheck    sync    ${USER_DOMAIN}
@@ -149,6 +159,56 @@ Enable a client
 Alter a missing client
     &{error} =    Run validation    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "nosuchapp1", "enabled": false}
     Should Be Equal    ${error.error}    client_not_found
+
+Restrict a client to a group
+    Run task    module/${ldap_module_id}/add-group    {"group": "g2", "description": "Group Two", "users": []}    decode_json=${FALSE}
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "g1"}    decode_json=${FALSE}
+    &{client} =    Client    ${USER_DOMAIN}    ${FAKE_APP}
+    Should Be Equal    ${client.access_group}    g1
+    Should Be True    ${client.enabled}
+    &{state} =    Run task    module/${module_id}/get-client-access    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "live": true, "user": "u1"}
+    Should Be True    ${state.enforced}
+    Should Be True    ${state.live['ok']}
+    Should Be True    ${state.live['ldap_connection']}
+    Should Be True    ${state.live['group_in_ldap']}
+    Should Be True    ${state.live['user_allowed']}
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "g2"}    decode_json=${FALSE}
+    &{state} =    Run task    module/${module_id}/get-client-access    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "live": true, "user": "u1"}
+    Should Be True    ${state.live['ok']}
+    Should Not Be True    ${state.live['user_allowed']}
+    &{error} =    Run validation    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": "nosuchgroup"}
+    Should Be Equal    ${error.error}    group_not_found
+    &{error} =    Run validation    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false, "directory_groups_only": false}
+    Should Be Equal    ${error.error}    access_policies_in_use
+    Run task    module/${module_id}/alter-realm-client    {"domain": "${USER_DOMAIN}", "client_id": "${FAKE_APP}", "access_group": null}    decode_json=${FALSE}
+    &{client} =    Client    ${USER_DOMAIN}    ${FAKE_APP}
+    Should Be Equal    ${client.access_group}    ${NONE}
+    [Teardown]    Run task    module/${ldap_module_id}/remove-group    {"group": "g2"}    decode_json=${FALSE}
+
+Certificate transport cannot silently enable with the stock proxy
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Not Be True    ${state.enabled}
+    Should Be Empty    ${state.certificates}
+    &{error} =    Run validation    module/${module_id}/alter-certificates    {"domain": "${USER_DOMAIN}", "operation": "enable"}
+    Should Be Equal    ${error.error}    traefik_certificate_support_required
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Not Be True    ${state.enabled}
+    ${status} =    Login page status    ${USER_DOMAIN}    ${FAKE_APP}    ${REDIRECT_URI}
+    Should Be Equal    ${status}    200
+
+Enroll and revoke a public device certificate
+    ${certificate}    ${rc} =    Execute Command    umask 077 && openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/idp-x509-test.key -out /tmp/idp-x509-test.crt -days 2 -subj '/CN=ns8-test' -addext 'basicConstraints=critical,CA:FALSE' -addext 'keyUsage=critical,digitalSignature' -addext 'extendedKeyUsage=clientAuth' 2>/dev/null && cat /tmp/idp-x509-test.crt
+    ...    return_rc=True
+    Should Be Equal As Integers    ${rc}    0
+    ${request} =    Evaluate    json.dumps(dict(domain=$USER_DOMAIN, operation='enroll', username='u1', label='NS8 test', certificate=$certificate))    modules=json
+    Run task    module/${module_id}/alter-certificates    ${request}    decode_json=${FALSE}
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Length Should Be    ${state.certificates}    1
+    ${fingerprint} =    Set Variable    ${state.certificates[0]['fingerprint']}
+    Should Be Equal    ${state.certificates[0]['username']}    u1
+    Run task    module/${module_id}/alter-certificates    {"domain": "${USER_DOMAIN}", "operation": "revoke", "fingerprint": "${fingerprint}"}    decode_json=${FALSE}
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Be Empty    ${state.certificates}
 
 Disable and enable the realm
     Run task    module/${module_id}/alter-realm    {"domain": "${USER_DOMAIN}", "enabled": false}    decode_json=${FALSE}

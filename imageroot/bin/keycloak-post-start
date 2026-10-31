@@ -13,7 +13,8 @@
 # - the LDAP federation follows the user domain settings;
 # - a module client exists only while the module is bound to the user
 #   domain of the realm;
-# - the SMTP settings follow the node smarthost.
+# - the SMTP settings follow the node smarthost;
+# - the access policies of the clients are complete.
 #
 
 import os
@@ -21,6 +22,8 @@ import sys
 
 import agent
 import agent.ldapproxy
+import idpaccess
+import idpcert
 import idprealm
 import kcadmin
 
@@ -44,23 +47,52 @@ def smtp_server_rep(settings):
         rep["password"] = settings["password"]
     return rep
 
-rdb = agent.redis_connect(use_replica=True)
-smtp_server = smtp_server_rep(agent.get_smarthost_settings(rdb))
+# Registrations and client changes modify the same realms: concurrent
+# updates of the LDAP federation fail with an optimistic lock error
+with idprealm.realms_lock():
+    # The HTTP listener can precede completion of model bootstrap during
+    # upgrades. Its 503 phase exceeds the short per-request retry budget.
+    kcadmin.wait_ready()
 
-user_domains = agent.ldapproxy.Ldapproxy().get_domains_list()
+    rdb = agent.redis_connect()
+    smtp_server = smtp_server_rep(agent.get_smarthost_settings(rdb))
 
-kc = kcadmin.agent_client()
-for realm in kcadmin.managed_realms(kc):
-    if realm in user_domains:
-        idprealm.ensure_federation(kc, realm)
-    else:
-        print(agent.SD_WARNING + f"User domain {realm} not found: the LDAP federation of its realm is not updated", file=sys.stderr)
+    user_domains = agent.ldapproxy.Ldapproxy().get_domains_list()
 
-    for client in idprealm.module_clients(kc, realm):
-        module_id = client["attributes"][idprealm.MODULE_ATTRIBUTE]
-        if realm not in (rdb.hget("cluster/module_domains", module_id) or "").split():
-            print(f"Deleting client {client['clientId']} of realm {realm}: module {module_id} is not bound to the user domain", file=sys.stderr)
-            kc.delete(f"/{realm}/clients/{client['id']}")
+    kc = kcadmin.agent_client()
+    certificate_realms = []
+    for realm in kcadmin.managed_realms(kc):
+        if realm in user_domains:
+            idprealm.ensure_federation(kc, realm)
+        else:
+            print(agent.SD_WARNING + f"User domain {realm} not found: the LDAP federation of its realm is not updated", file=sys.stderr)
 
-    print(f"Applying SMTP settings to realm {realm}", file=sys.stderr)
-    kc.put(f"/{realm}", {"smtpServer": smtp_server})
+        clients = []
+        for client in idprealm.module_clients(kc, realm):
+            module_id = client["attributes"][idprealm.MODULE_ATTRIBUTE]
+            if realm not in (rdb.hget("cluster/module_domains", module_id) or "").split():
+                print(f"Deleting client {client['clientId']} of realm {realm}: module {module_id} is not bound to the user domain", file=sys.stderr)
+                kc.delete(f"/{realm}/clients/{client['id']}")
+            else:
+                clients.append(client)
+        idpaccess.reconcile(kc, realm, clients)
+
+        print(f"Applying SMTP settings to realm {realm}", file=sys.stderr)
+        kc.put(f"/{realm}", {"smtpServer": smtp_server})
+        if idpcert.enabled(kc.get('/' + idpcert.path(realm))):
+            certificate_realms.append(realm)
+
+    if certificate_realms:
+        from idp_routes import certificate_transport
+        # Repair routes after restore/update and rebind a flow which a legacy
+        # cleanup may have reset. A missing proxy capability must not stop the
+        # other realms: get-certificates reports them as not operational.
+        try:
+            certificate_transport(True)
+            for realm in certificate_realms:
+                try:
+                    idpcert.set_enabled(kc, realm, True, idpcert.proxy_secret())
+                except idpcert.CertificateError as ex:
+                    print(agent.SD_WARNING + f"Certificate sign-in of realm {realm} is not operational: {ex}", file=sys.stderr)
+        except idpcert.CertificateError as ex:
+            print(agent.SD_WARNING + f"Certificate sign-in transport is not operational: {ex}", file=sys.stderr)

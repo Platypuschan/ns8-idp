@@ -21,6 +21,8 @@ import urllib.parse
 
 import agent
 import agent.ldapproxy
+import idpcert
+import idpsettings
 import kcadmin
 
 LDAP_COMPONENT_NAME = "ns8-ldap"
@@ -28,6 +30,9 @@ GROUP_MAPPER_NAME = "groups"
 LDAP_UUID_SCOPE = "ldap_uuid"
 # Client attribute recording the owner module of a client
 MODULE_ATTRIBUTE = "ns8.module_id"
+ACCESS_TOKEN_LIFESPAN = "access.token.lifespan"
+# Default of optional client settings that are kept when not given
+KEEP = object()
 # ldapproxy listens on the node VPN address, reachable from the pod
 LDAPPROXY_HOST = "cluster-localnode"
 
@@ -136,14 +141,16 @@ def ldap_component_config(domain, service_account=None):
         })
     return config
 
-def group_mapper_config(domain):
+def group_mapper_config(domain, writable=False):
     lp = agent.ldapproxy.Ldapproxy()
     ldom = lp.get_domain(domain)
     config = {
         "group.name.ldap.attribute": ["cn"],
         "groups.ldap.filter": [lp.get_ldap_groups_search_filter_clause(domain)],
         "preserve.group.inheritance": ["false"],
-        "mode": ["READ_ONLY"],
+        # LDAP_ONLY would write memberships to a writable federation
+        "mode": ["LDAP_ONLY" if idpsettings.get("directory_groups_only") and not writable else "READ_ONLY"],
+        "groups.path": ["/"],
         "user.roles.retrieve.strategy": ["LOAD_GROUPS_BY_MEMBER_ATTRIBUTE"],
         "drop.non.existing.groups.during.sync": ["false"],
     }
@@ -230,9 +237,6 @@ def ensure_federation(kc, domain):
     realm_id = kc.get(f"/{domain}")["id"]
     storage_type = "org.keycloak.storage.UserStorageProvider"
     component = _find_component(kc, domain, realm_id, storage_type, LDAP_COMPONENT_NAME)
-    if component and not writable:
-        # Mappers of a read-only federation cannot write
-        idpfed.ensure_read_only_mappers(kc, domain, component["id"])
     if component is None:
         print(f"Creating the LDAP federation of realm {domain}", file=sys.stderr)
         kc.post(f"/{domain}/components", {
@@ -247,23 +251,31 @@ def ensure_federation(kc, domain):
         component["config"].update(config)
         kc.put(f"/{domain}/components/{component['id']}", component)
 
-    mapper_type = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
-    mapper_config = group_mapper_config(domain)
-    mapper = _find_component(kc, domain, component["id"], mapper_type, GROUP_MAPPER_NAME)
-    if mapper is None:
-        kc.post(f"/{domain}/components", {
-            "name": GROUP_MAPPER_NAME,
-            "providerId": "group-ldap-mapper",
-            "providerType": mapper_type,
-            "parentId": component["id"],
-            "config": mapper_config,
-        })
-    else:
-        mapper["config"].update(mapper_config)
-        kc.put(f"/{domain}/components/{mapper['id']}", mapper)
+    if component and not writable:
+        # Mappers of a read-only federation cannot write
+        idpfed.ensure_read_only_mappers(kc, domain, component["id"])
 
+    _ensure_mapper(kc, domain, component["id"], GROUP_MAPPER_NAME, "group-ldap-mapper",
+                   group_mapper_config(domain, writable))
+    _ensure_mapper(kc, domain, component["id"], idpcert.ACCOUNT_MAPPER, "user-attribute-ldap-mapper",
+                   idpcert.account_state_mapper_config(config["vendor"] == ["ad"]))
     if writable:
         idpfed.ensure_writable_mappers(kc, domain, component["id"])
+
+def _ensure_mapper(kc, domain, parent_id, name, provider_id, config):
+    mapper_type = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
+    mapper = _find_component(kc, domain, parent_id, mapper_type, name)
+    if mapper is None:
+        kc.post(f"/{domain}/components", {
+            "name": name,
+            "providerId": provider_id,
+            "providerType": mapper_type,
+            "parentId": parent_id,
+            "config": config,
+        })
+    else:
+        mapper["config"].update(config)
+        kc.put(f"/{domain}/components/{mapper['id']}", mapper)
 
 def ensure_ldap_uuid_scope(kc, domain):
     """Add the ldap_uuid claim to every client of the realm, with a
@@ -291,11 +303,59 @@ def default_post_logout_redirect_uris(redirect_uris):
             origins.append(origin)
     return origins
 
+def validate_client_endpoints(redirect_uris, logout_uris, web_origins, audience):
+    """Keep exact native callbacks and HTTPS endpoints; never host wildcards.
+    A logout path may end in /* for compatibility with the upstream fallback.
+    """
+    import ipaddress
+    import re
+    def check(uri, logout=False):
+        if not isinstance(uri, str) or any(c.isspace() or ord(c) < 32 for c in uri):
+            raise ValueError('invalid_client_uri')
+        url = urllib.parse.urlsplit(uri)
+        if not url.scheme or url.fragment or url.username or url.password:
+            raise ValueError('invalid_client_uri')
+        if '*' in uri and not (logout and url.path.endswith('/*') and uri.count('*') == 1):
+            raise ValueError('wildcard_client_uri')
+        if url.scheme in ('https', 'http'):
+            if not url.hostname or '*' in url.netloc:
+                raise ValueError('invalid_client_host')
+            try:
+                loopback = ipaddress.ip_address(url.hostname).is_loopback
+            except ValueError:
+                loopback = url.hostname == 'localhost'
+            if url.scheme == 'http' and not loopback:
+                raise ValueError('https_client_uri_required')
+            try:
+                url.port
+            except ValueError:
+                raise ValueError('invalid_client_port') from None
+        elif url.scheme in ('javascript', 'data', 'file', 'blob', 'about', 'ftp') or not (url.netloc or url.path):
+            raise ValueError('invalid_native_callback')
+        return url
+    for uri in redirect_uris:
+        check(uri)
+    for uri in logout_uris:
+        check(uri, logout=True)
+    for origin in web_origins:
+        if origin == '+':
+            continue  # Keycloak derives origins from validated callbacks.
+        url = check(origin)
+        if url.scheme not in ('https', 'http') or url.path or url.query:
+            raise ValueError('exact_web_origin_required')
+    for target in audience:
+        if (not isinstance(target, str) or not re.fullmatch(r'[a-zA-Z0-9_.-]+', target)
+                or target in ('admin-cli', 'security-admin-console', 'realm-management', 'account', 'account-console')):
+            raise ValueError('invalid_client_audience')
+
 def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_uris=(),
-        web_origins=(), audience=(), rotate_secret=False):
+        web_origins=(), audience=(), rotate_secret=False, access_token_lifespan=KEEP, access_required=False, expected_access_group=KEEP):
     """Create or update the OIDC client of a module, and return its
     secret. The secret is generated on creation, and when rotate_secret
-    is set."""
+    is set. The access token lifespan, in seconds, is kept unless given;
+    None restores the realm default."""
+    if idpsettings.get("strict_client_uris"):
+        validate_client_endpoints(redirect_uris, post_logout_redirect_uris, web_origins, audience)
     rep = {
         "clientId": module_id,
         "name": module_id,
@@ -316,7 +376,29 @@ def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_u
         },
         "protocolMappers": [audience_mapper(client_id) for client_id in audience],
     }
+    if access_required:
+        rep["attributes"]["ns8.access_required"] = "true"
+    if expected_access_group is not KEEP:
+        if not access_required:
+            raise ValueError("expected_access_group_requires_access_required")
+        import idpaccess
+        expected = idpaccess.find_group(kc, realm, expected_access_group)
+        rep["attributes"][idpaccess.EXPECTED_GROUP] = expected["id"]
+        rep["attributes"][idpaccess.EXPECTED_SOURCE] = "consumer"
+    if access_token_lifespan is not KEEP:
+        # An empty value removes the attribute
+        rep["attributes"][ACCESS_TOKEN_LIFESPAN] = str(access_token_lifespan or "")
     current = kc.find_client(realm, module_id)
+    if access_required or (current and current.get("attributes", {}).get("ns8.access_required") == "true"):
+        import idpaccess
+        idpaccess.ensure_required_action(kc, realm)
+        if current is None:
+            rep["protocolMappers"].append({
+                "name": idpaccess.TOKEN_GATE_NAME, "protocol": "openid-connect",
+                "protocolMapper": idpaccess.TOKEN_GATE, "config": {},
+            })
+        else:
+            idpaccess._ensure_token_gate(kc, realm, current)
     if current is None:
         print(f"Creating client {module_id} in realm {realm}", file=sys.stderr)
         rep["secret"] = secrets.token_urlsafe(32)
@@ -327,7 +409,13 @@ def ensure_client(kc, realm, module_id, redirect_uris=(), post_logout_redirect_u
     # Protocol mappers are not updated by a client update: replace the
     # audience mappers separately
     mappers = rep.pop("protocolMappers")
-    current["attributes"].update(rep.pop("attributes"))
+    if access_required and expected_access_group is KEEP and current.get("attributes", {}).get("ns8.access_required") != "true":
+        # Pin the already approved group on first activation, never repin
+        # a changed/missing policy during subsequent registrations.
+        approved = current.get("attributes", {}).get("ns8.access_group_id")
+        if approved:
+            rep["attributes"]["ns8.access_expected_group_id"] = approved
+    current.setdefault("attributes", {}).update(rep.pop("attributes"))
     current.update(rep)
     current.pop("protocolMappers", None)
     current.pop("secret", None)

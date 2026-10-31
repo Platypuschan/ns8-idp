@@ -1,0 +1,107 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "get-client-access output",
+    "type": "object",
+    "required": [
+        "enforced",
+        "enabled",
+        "group",
+        "group_path",
+        "issues"
+    ],
+    "properties": {
+        "enforced": {
+            "type": "boolean",
+            "description": "Every part of the policy is configured. Structural check only: see live"
+        },
+        "enabled": {
+            "type": "boolean"
+        },
+        "group": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "group_path": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "live": {
+            "description": "Only with live in the request",
+            "type": "object",
+            "required": [
+                "ok",
+                "ldap_connection",
+                "group_in_ldap",
+                "user_allowed",
+                "issues"
+            ],
+            "properties": {
+                "ok": {
+                    "type": "boolean",
+                    "description": "No live issue found"
+                },
+                "ldap_connection": {
+                    "type": "boolean",
+                    "description": "Keycloak binds to LDAP with the federation settings"
+                },
+                "group_in_ldap": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ],
+                    "description": "The policy group exists in LDAP; null if the client is not restricted or LDAP is not reachable"
+                },
+                "user_allowed": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ],
+                    "description": "The user of the request passes the token check now; null without user"
+                },
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "policy_required": {
+            "type": "boolean"
+        },
+        "policy_group_pinned": {
+            "type": "boolean"
+        },
+        "policy_consumer_bound": {
+            "type": "boolean"
+        }
+    },
+    "additionalProperties": false,
+    "examples": [
+        {
+            "enforced": true,
+            "enabled": true,
+            "group": "services_vaultwarden",
+            "group_path": "/services_vaultwarden",
+            "issues": [],
+            "live": {
+                "ok": true,
+                "ldap_connection": true,
+                "group_in_ldap": true,
+                "user_allowed": false,
+                "issues": []
+            }
+        }
+    ]
+}

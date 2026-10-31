@@ -11,10 +11,15 @@ After=idp.service postgres.service keycloak-init.service
 
 [Service]
 Environment=PODMAN_SYSTEMD_UNIT=%n
+# configure-module overrides it in the module environment: the ns8 theme
+# leads the host root to the account console of the user domain realm
+Environment=IDP_WELCOME_THEME=keycloak
 EnvironmentFile=%E/state/environment
 WorkingDirectory=%E/state
 Restart=always
-TimeoutStartSec=180
+# The start covers the health check (150s), keycloak-post-start waiting
+# for the model bootstrap (wait_ready, 300s) and its reconciliation
+TimeoutStartSec=600
 ExecStartPre=/bin/rm -f %t/keycloak.ctr-id
 # The unit is active when the health check reports Keycloak as ready.
 # The probe script of the image waits until Keycloak is ready in the
@@ -35,6 +40,7 @@ ExecStart=/usr/bin/podman run \
     --replace --name=%N \
     --env-file=%E/etc/keycloak.env \
     --env-file=./passwords.env \
+    --env=KC_SPI_THEME__WELCOME_THEME=${IDP_WELCOME_THEME} \
     ${IDP_KEYCLOAK_IMAGE} \
         start --optimized \
         --hostname=https://${IDP_HOSTNAME}

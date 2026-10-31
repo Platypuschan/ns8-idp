@@ -58,7 +58,7 @@ Add module for ${SCENARIO} scenario
     Set Global Variable    ${module_id}    ${output.module_id}
 
 Configure module
-    Run task    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false}    decode_json=${FALSE}
+    Run task    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false, "restrict_admin_console": true, "directory_groups_only": true, "account_home_redirect": true, "strict_client_uris": true}    decode_json=${FALSE}
     &{config} =    Run task    module/${module_id}/get-configuration    {}
     Should Be Equal    ${config.host}    ${IDP_HOST}
     Should Not Be True    ${config.lets_encrypt}

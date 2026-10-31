@@ -1,1 +1,2 @@
 org.nethserver.keycloak.LinkByAttributeAuthenticatorFactory
+org.nethserver.keycloak.access.DeviceCertificateFactory
