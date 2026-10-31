@@ -5,7 +5,7 @@ Resource    idp.resource
 Suite Setup    Require disposable proxy test
 
 *** Variables ***
-${CERTIFICATE_TRANSPORT_TEST}    ${FALSE}
+${CERTIFICATE_TRANSPORT_TEST}    ${TRUE}
 ${CERTIFICATE_APP}    x509test1
 ${CERTIFICATE_REDIRECT}    https://certificate-app.fqdn.test/callback
 
