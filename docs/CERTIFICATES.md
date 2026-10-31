@@ -60,10 +60,22 @@ Disabling certificate sign-in returns the realm to its standard browser flow
 without deleting enrollments. It prevents new certificate logins, not every
 existing application/IdP session. Password login remains available.
 
-Admin-only actions are `get-certificates` (`domain`) and `alter-certificates`
+A realm holds at most 128 certificates. Enabling or disabling makes the IdP address
+unreachable for a few seconds, because the proxy reloads both routes. Applications
+which request `prompt=login` always show the password form; use it to sign in with
+another account on an enrolled device.
+
+If the page reports that sign-in is enabled but not effective, the proxy lost the
+capability (usually a Traefik update replaced the patched module) or the realm's
+browser flow was changed. Password sign-in keeps working. Reinstall the capability
+and restart the module, or restore the flow.
+
+The actions are `get-certificates` (`domain`) and `alter-certificates`
 (`domain`, `operation`: `enable`, `disable`, `enroll`, `revoke`). Enrollment adds
 `username`, `label`, `certificate` (public PEM); revoke adds `fingerprint`.
-They are deliberately not granted to application `clientadm` accounts.
+`alter-certificates` needs the module owner role; `get-certificates` also matches
+the `reader` role and shows users, labels and fingerprints, no secrets. Neither is
+granted to application `clientadm` accounts.
 
 ## Reproducible development tests
 

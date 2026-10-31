@@ -34,6 +34,14 @@
                 )
               }}
             </p>
+            <NsInlineNotification
+              v-if="
+                states[realm.name].enabled && !states[realm.name].operational
+              "
+              kind="warning"
+              :title="$t('certificates.not_operational')"
+              :showCloseButton="false"
+            />
             <NsButton
               kind="secondary"
               :disabled="busyRealm"
@@ -59,7 +67,10 @@
                 class="mg-bottom-md"
               >
                 <strong>{{ cert.label }}</strong> — {{ cert.username }}<br />
-                {{ $t("certificates.expires") }} {{ cert.not_after }}<br />
+                {{ $t("certificates.expires") }} {{ cert.not_after }}
+                <strong v-if="certificateState(cert)">
+                  ({{ $t("certificates." + certificateState(cert)) }})</strong
+                ><br />
                 <code class="fingerprint">{{ cert.fingerprint }}</code
                 ><br />
                 <NsButton
@@ -87,6 +98,7 @@
                 $t("certificates.public_certificate")
               }}</label>
               <input
+                :key="fileInputs[realm.name]"
                 :id="'certificate-' + realm.name"
                 type="file"
                 accept=".crt,.pem,.cer"
@@ -123,6 +135,7 @@ export default {
       q: { page: "certificates" },
       states: {},
       forms: {},
+      fileInputs: {},
       message: "",
       busyRealm: false,
     };
@@ -141,13 +154,24 @@ export default {
       }
       this.realms = result.realms;
       for (const realm of this.realms) {
-        this.$set(this.forms, realm.name, {
-          username: "",
-          label: "",
-          certificate: "",
-        });
+        this.resetForm(realm);
         await this.load(realm);
       }
+    },
+    resetForm(realm) {
+      this.$set(this.forms, realm.name, {
+        username: "",
+        label: "",
+        certificate: "",
+      });
+      // A new key clears the file input, which has no bindable value
+      this.$set(this.fileInputs, realm.name, Date.now());
+    },
+    certificateState(cert) {
+      if (cert.revoked) return "revocation_pending";
+      const remaining = new Date(cert.not_after) - new Date();
+      if (remaining <= 0) return "expired";
+      return remaining < 30 * 24 * 3600 * 1000 ? "expires_soon" : "";
     },
     async load(realm) {
       const [error, result] = await to(
@@ -200,12 +224,14 @@ export default {
       if (error) this.message = this.errorText(error);
       await this.load(realm);
       this.busyRealm = false;
+      return !error;
     },
     async enroll(realm) {
-      await this.change(realm, {
+      const enrolled = await this.change(realm, {
         operation: "enroll",
         ...this.forms[realm.name],
       });
+      if (enrolled) this.resetForm(realm);
     },
     async revoke(realm, cert) {
       if (

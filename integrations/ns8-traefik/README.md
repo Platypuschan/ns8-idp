@@ -31,8 +31,8 @@ the patch. Without a full checkout it prepares just the four changed files for
 tests. It never edits an installed NS8 Traefik. Build/test the full checkout using
 the upstream workflow; deploying that proxy change is a separate operation.
 
-IdP enablement verifies both route readbacks acknowledge the capability; an
-unmodified proxy cannot silently enable the feature. Disablement removes the
+IdP enablement writes both routes in parallel tasks and verifies both readbacks
+acknowledge the capability; an unmodified proxy cannot silently enable the feature. Disablement removes the
 certificate TLS options and forwarding middlewares through the ordinary API.
 Deleting the routes removes their configuration and TLS options with them.
 

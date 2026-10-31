@@ -145,7 +145,7 @@ class CertificateLogin(fixture.LoginTests):
         super().cleanup()
         cls.temp.cleanup()
 
-    def cert_auth(self, cert=None, headers=None, session=None, username=None, client='vaultwarden1'):
+    def cert_auth(self, cert=None, headers=None, session=None, username=None, client='vaultwarden1', **params):
         s = session or requests.Session()
         s.verify = self.server[0]
         if cert: s.cert = cert
@@ -154,7 +154,7 @@ class CertificateLogin(fixture.LoginTests):
         url = self.frontend_url + '/realms/ad.test/protocol/openid-connect/auth?' + urlencode({
             'client_id': client, 'redirect_uri': self.vw_url + '/identity/connect/oidc-signin',
             'response_type': 'code', 'scope': 'openid', 'state': secrets.token_urlsafe(20),
-            'code_challenge': challenge, 'code_challenge_method': 'S256'})
+            'code_challenge': challenge, 'code_challenge_method': 'S256', **params})
         r = s.get(url, headers=headers, allow_redirects=False, timeout=20)
         for _ in range(15):
             if r.is_redirect:
@@ -172,6 +172,24 @@ class CertificateLogin(fixture.LoginTests):
         _, r, target, _ = self.cert_auth(self.allowed)
         self.assertIn('code=', target or '', 'HTTP ' + str(r.status_code) + r.text[-400:])
         _, _, target, _ = self.cert_auth(username='allowed')
+        self.assertIn('code=', target or '')
+
+    def test_x509_new_authentication_requests_need_the_password_form(self):
+        # Without an SSO session: prompt=login leaves the account choice open.
+        _, r, target, _ = self.cert_auth(self.allowed, prompt='login')
+        self.assertIsNone(target)
+        self.assertTrue(fixture.Form(r.text).action, 'password form expected')
+        # With one: a certificate does not answer forced re-authentication.
+        session, _, target, _ = self.cert_auth(self.allowed)
+        self.assertIn('code=', target or '')
+        time.sleep(2)  # max_age compares whole seconds since the login
+        for params in ({'prompt':'login'}, {'max_age':'1'}):
+            with self.subTest(params=params):
+                _, r, target, _ = self.cert_auth(self.allowed, session=session, **params)
+                self.assertIsNone(target)
+                self.assertTrue(fixture.Form(r.text).action, 'password form expected')
+        # The ordinary SSO cookie keeps working.
+        _, _, target, _ = self.cert_auth(self.allowed, session=session)
         self.assertIn('code=', target or '')
 
     def test_x509_no_unknown_expired_or_forged_certificate(self):

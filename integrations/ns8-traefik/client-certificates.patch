@@ -23,28 +23,28 @@
  # Enable or disable HTTP 2 HTTPS redirection
  if data.get("http2https"):
      router_http["middlewares"] = ["http2https-redirectscheme"]
-@@ -168,6 +184,10 @@
- # Add serversTransports if we need to not verify self signed certificates
+@@ -169,6 +185,10 @@
  if 'skip_cert_verify' in data and data["skip_cert_verify"]:
      config["http"]["serversTransports"] =  serversTransports
-+
+ 
 +if data.get('client_certificates'):
 +    config['tls'] = {'options': {'ns8-client-certificates': {
 +        'minVersion': 'VersionTLS12', 'clientAuth': {'clientAuthType': 'RequestClientCert'}}}}
- 
++
  if middlewares:
      config["http"]["middlewares"] = middlewares
+ 
 --- a/imageroot/pypkg/get_route.py
 +++ b/imageroot/pypkg/get_route.py
-@@ -63,6 +63,8 @@
- 
+@@ -64,6 +64,8 @@
          # Check if the certificate is retrieved automatically
          route['lets_encrypt'] = True if traefik_https_route['tls'].get("certResolver") else False
-+
-+        route['client_certificates'] = traefik_https_route['tls'].get('options') == 'ns8-client-certificates@file'
  
++        route['client_certificates'] = traefik_https_route['tls'].get('options') == 'ns8-client-certificates@file'
++
          # Strip @file suffix from middleware names
          for mid in traefik_http_route.get("middlewares",[]) + traefik_https_route.get("middlewares",[]):
+             middlewares.append(mid[0:mid.index('@')])
 --- a/imageroot/actions/set-route/validate-input.json
 +++ b/imageroot/actions/set-route/validate-input.json
 @@ -244,6 +244,10 @@
@@ -57,24 +57,10 @@
 +            "description": "Request TLS client certificates and forward the PEM after removing inbound certificate headers. The backend MUST authorize certificates independently. Requires host and http2https. All routes for the same hostname must use the same value."
          }
      }
--}
+ }
 \ No newline at end of file
-+}
 --- a/imageroot/actions/get-route/validate-output.json
 +++ b/imageroot/actions/get-route/validate-output.json
-@@ -155,10 +155,10 @@
-             "description": "If true, the route is flagged as manually created by a user"
-         },
-         "ip_allowlist": {
--            "type":"array",
-+            "type": "array",
-             "description": "List of allowed client ip addresses, in CIDR format",
-             "items": {
--                "type":"string"
-+                "type": "string"
-             }
-         },
-         "headers": {
 @@ -202,6 +202,10 @@
                      "description": "If insecureSkipVerify is true, the TLS connection to the authentication server accepts any certificate presented by the server regardless of the hostnames it covers"
                  }
@@ -85,6 +71,5 @@
 +            "description": "Request TLS client certificates and forward the PEM after removing inbound certificate headers. The backend MUST authorize certificates independently. Requires host and http2https. All routes for the same hostname must use the same value."
          }
      }
--}
+ }
 \ No newline at end of file
-+}

@@ -1,6 +1,7 @@
 """Keep the internal Keycloak admin API off the public host route."""
 import os
 import copy
+import sys
 import time
 import agent
 import idpcert
@@ -14,6 +15,37 @@ def restrict_admin(host, lets_encrypt=False):
     })
 
 
+def _write_routes(routes):
+    """Write all routes of the hostname at the same time and report success.
+
+    Traefik drops every router of a hostname while their TLS options differ.
+    Sequential set-route tasks would keep that window open for the whole
+    29waitsync retry budget, and agent.set_route() exits on errors, which
+    would skip the rollback. The acme checks are off: these routes keep the
+    certificate they have, and configure-module already validated new ones.
+    """
+    traefik = agent.resolve_agent_id('traefik@node')
+    results = agent.tasks.runp([{
+        'agent_id': traefik, 'action': 'set-route',
+        'data': {**route, 'lets_encrypt_check': False, 'lets_encrypt_cleanup': False},
+    } for route in routes], extra={'isNotificationHidden': True})
+    success = True
+    for route, result in zip(routes, results):
+        if isinstance(result, Exception) or result['exit_code'] != 0:
+            error = result if isinstance(result, Exception) else result.get('error')
+            print(f"set-route {route['instance']} failed: {error}", file=sys.stderr)
+            success = False
+    return success
+
+
+def _in_sync(routes, proof, host, lets_encrypt):
+    """True if the proxy already serves the wanted certificate transport."""
+    return all(route.get('client_certificates') is True and route.get('host') == host
+               and route.get('headers', {}).get('request', {}).get(idpcert.PROOF_HEADER) == proof
+               and (lets_encrypt is None or route.get('lets_encrypt') == lets_encrypt)
+               for route in routes)
+
+
 def certificate_transport(value, host=None, lets_encrypt=None):
     """Require an acknowledged Traefik capability, never trust ignored input.
 
@@ -21,39 +53,46 @@ def certificate_transport(value, host=None, lets_encrypt=None):
     Traefik falls back to default options because TLS precedes path routing.
     """
     host = host or os.environ['IDP_HOSTNAME']
-    original = []
+    original = [(os.environ['MODULE_ID'] + suffix,
+                 agent.get_route(os.environ['MODULE_ID'] + suffix))
+                for suffix in ('', '-admin')]
+    if lets_encrypt is None and not all(old for _, old in original):
+        # The route is the only record of the Let's Encrypt choice: guessing
+        # it would silently switch the hostname to the default certificate.
+        raise idpcert.CertificateError('idp_route_missing')
+    proof = idpcert.proxy_secret() if value else ''
+    if value and _in_sync([old for _, old in original], proof, host, lets_encrypt):
+        return
+    routes = []
+    for index, (instance, old) in enumerate(original):
+        route = copy.deepcopy(old)
+        route.update(instance=instance, host=host,
+                     url='http://127.0.0.1:' + os.environ['TCP_PORT'],
+                     http2https=True, client_certificates=value)
+        if lets_encrypt is not None:
+            route['lets_encrypt'] = lets_encrypt
+        if index:
+            route.update(path='/admin', ip_allowlist=['127.0.0.1/32', '::1/128'])
+        headers = route.setdefault('headers', {}).setdefault('request', {})
+        headers[idpcert.HEADER] = ''
+        headers['X-Forwarded-Tls-Client-Cert-Info'] = ''
+        headers[idpcert.PROOF_HEADER] = proof
+        routes.append(route)
     try:
-        original = [(os.environ['MODULE_ID'] + suffix,
-                     agent.get_route(os.environ['MODULE_ID'] + suffix))
-                    for suffix in ('', '-admin')]
-        for index, (instance, old) in enumerate(original):
-            route = copy.deepcopy(old)
-            route.update(instance=instance, host=host,
-                         url='http://127.0.0.1:' + os.environ['TCP_PORT'],
-                         http2https=True, client_certificates=value)
-            if lets_encrypt is not None:
-                route['lets_encrypt'] = lets_encrypt
-            if index:
-                route.update(path='/admin', ip_allowlist=['127.0.0.1/32', '::1/128'])
-            headers = route.setdefault('headers', {}).setdefault('request', {})
-            headers[idpcert.HEADER] = ''
-            headers['X-Forwarded-Tls-Client-Cert-Info'] = ''
-            headers[idpcert.PROOF_HEADER] = idpcert.proxy_secret() if value else ''
-            agent.set_route(route)
+        if not _write_routes(routes):
+            raise idpcert.CertificateError('traefik_route_failed')
         if value:
-            # SNI precedes HTTP routing. While only one router has changed,
-            # Traefik resolves conflicting TLS options to its defaults. Apply
-            # both first, then check their effective capability together.
+            # Check the effective capability of both routes together.
             deadline = time.monotonic() + 10
-            while not all(agent.get_route(instance).get('client_certificates') is True
-                          for instance, _ in original):
+            while not all(agent.get_route(route['instance']).get('client_certificates') is True
+                          for route in routes):
                 if time.monotonic() >= deadline:
                     raise idpcert.CertificateError('traefik_certificate_support_required')
                 time.sleep(.2)
     except Exception:
-        for instance, old in reversed(original):
-            if old:
-                agent.set_route({**old, 'instance': instance,
-                                 'headers': old.get('headers', {}),
-                                 'client_certificates': old.get('client_certificates', False)})
+        rollback = [{**old, 'instance': instance, 'headers': old.get('headers', {}),
+                     'client_certificates': old.get('client_certificates', False)}
+                    for instance, old in original if old]
+        if rollback and not _write_routes(rollback):
+            print('Cannot restore the previous IdP routes', file=sys.stderr)
         raise

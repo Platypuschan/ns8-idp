@@ -7,6 +7,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT / 'imageroot/pypkg'))
 
 class CleanupAuthority(unittest.TestCase):
     def run_cleanup(self, bound='ad.test', failure=False):

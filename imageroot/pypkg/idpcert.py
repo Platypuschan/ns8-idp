@@ -63,6 +63,11 @@ def enabled(rep):
     return rep.get('attributes', {}).get(ENABLED) == 'true'
 
 
+def operational_flow(rep):
+    """The realm has certificates enabled and its browser flow accepts them."""
+    return enabled(rep) and rep.get('browserFlow') == FLOW
+
+
 def inspect(pem):
     # Reject bundles/private keys instead of silently enrolling their first cert.
     if not re.fullmatch(r'\s*-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*', pem):
@@ -139,6 +144,8 @@ def set_enabled(kc, realm, value, proof=None):
     if value:
         if not proof or not re.fullmatch('[a-f0-9]{64}', proof):
             raise CertificateError('invalid_proxy_secret')
+        if operational_flow(rep) and rep['attributes'].get(PROOF_ATTRIBUTE) == proof:
+            return
         if rep.get('browserFlow') not in ('browser', FLOW):
             raise CertificateError('custom_browser_flow')
         flows = kc.get(base + '/authentication/flows')
@@ -159,9 +166,9 @@ def set_enabled(kc, realm, value, proof=None):
             executions = kc.get(endpoint)
         flow = FLOW
     else:
-        if rep.get('browserFlow') not in ('browser', FLOW):
-            raise CertificateError('custom_browser_flow')
-        flow = 'browser'
+        # Leave a browser flow bound by an administrator in place: disabling
+        # must always work and only undoes the binding made by this module.
+        flow = 'browser' if rep.get('browserFlow') == FLOW else rep.get('browserFlow')
     attrs = dict(rep.get('attributes', {}))
     attrs[ENABLED] = str(value).lower()
     if value:

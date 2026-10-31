@@ -94,7 +94,14 @@ with idprealm.realms_lock():
     if certificate_realms:
         from idp_routes import certificate_transport
         # Repair routes after restore/update and rebind a flow which a legacy
-        # cleanup may have reset. Missing proxy capability fails this reconcile.
-        certificate_transport(True)
-        for realm in certificate_realms:
-            idpcert.set_enabled(kc, realm, True, idpcert.proxy_secret())
+        # cleanup may have reset. A missing proxy capability must not stop the
+        # other realms: get-certificates reports them as not operational.
+        try:
+            certificate_transport(True)
+            for realm in certificate_realms:
+                try:
+                    idpcert.set_enabled(kc, realm, True, idpcert.proxy_secret())
+                except idpcert.CertificateError as ex:
+                    print(agent.SD_WARNING + f"Certificate sign-in of realm {realm} is not operational: {ex}", file=sys.stderr)
+        except idpcert.CertificateError as ex:
+            print(agent.SD_WARNING + f"Certificate sign-in transport is not operational: {ex}", file=sys.stderr)

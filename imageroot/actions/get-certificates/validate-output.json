@@ -2,11 +2,16 @@
   "type": "object",
   "required": [
     "enabled",
+    "operational",
     "certificates"
   ],
   "properties": {
     "enabled": {
       "type": "boolean"
+    },
+    "operational": {
+      "type": "boolean",
+      "description": "Sign-in works now: the realm flow is bound and the proxy reports the capability"
     },
     "certificates": {
       "type": "array",

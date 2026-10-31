@@ -127,38 +127,106 @@ class CertificateTests(unittest.TestCase):
             with self.assertRaises(jsonschema.ValidationError): jsonschema.validate(request, schema)
         jsonschema.validate({'domain':'ad.test','operation':'enable'}, schema)
 
-    def test_stock_traefik_cannot_silently_enable_certificate_login(self):
-        original = {'idp1': {'instance':'idp1','host':'sso.test','url':'http://127.0.0.1:1234','http2https':True},
-                    'idp1-admin': {'instance':'idp1-admin','host':'sso.test','url':'http://127.0.0.1:1234','path':'/admin',
-                                   'http2https':True,'ip_allowlist':['127.0.0.1/32','::1/128']}}
-        for supported in (False, True):
-            routes = copy.deepcopy(original)
-            agent = types.ModuleType('agent')
-            def get_route(instance):
-                result = copy.deepcopy(routes.get(instance, {}))
-                if supported and not all(r.get('client_certificates') for r in routes.values()):
-                    result['client_certificates'] = False
-                return result
-            agent.get_route = get_route
-            def set_route(data):
-                routes[data['instance']].update(copy.deepcopy(data))
+    def route_module(self, routes, supported=True, failing=()):
+        """idp_routes with a fake proxy. agent.set_route is absent: it exits."""
+        agent = types.ModuleType('agent')
+        calls = []
+        def get_route(instance):
+            result = copy.deepcopy(routes.get(instance, {}))
+            if result and supported and not all(r.get('client_certificates') for r in routes.values()):
+                result['client_certificates'] = False
+            return result
+        def runp(tasks, **kwargs):
+            calls.append([t['data'] for t in tasks])
+            results = []
+            for task in tasks:
+                data = copy.deepcopy(task['data'])
+                self.assertFalse(data['lets_encrypt_check'] or data['lets_encrypt_cleanup'])
+                if data['instance'] in failing and len(calls) == 1:
+                    results.append({'exit_code': 3, 'error': 'failed', 'output': ''})
+                    continue
+                routes.setdefault(data['instance'], {}).update(data)
                 if not supported: routes[data['instance']].pop('client_certificates', None)
                 if not routes[data['instance']].get('headers'):
                     routes[data['instance']].pop('headers', None)
-            agent.set_route = set_route
-            spec = importlib.util.spec_from_file_location('cert_routes', ROOT/'imageroot/pypkg/idp_routes.py')
-            module = importlib.util.module_from_spec(spec)
-            with patch.object(cert, 'proxy_secret', return_value='a'*64), patch.dict(sys.modules, {'agent':agent, 'idpcert':cert}), patch.dict(os.environ,
-                    {'MODULE_ID':'idp1','IDP_HOSTNAME':'sso.test','TCP_PORT':'1234'}):
-                spec.loader.exec_module(module)
-                if supported:
-                    module.certificate_transport(True)
-                    self.assertTrue(all(r['client_certificates'] for r in routes.values()))
-                    self.assertTrue(all(r['headers']['request'][cert.HEADER] == '' for r in routes.values()))
-                    self.assertEqual(routes['idp1-admin']['ip_allowlist'], ['127.0.0.1/32','::1/128'])
-                else:
-                    # No wall-clock wait for a deliberately unsupported API.
-                    module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
-                    with self.assertRaisesRegex(cert.CertificateError, 'traefik_certificate_support_required'):
-                        module.certificate_transport(True)
-                    self.assertEqual(routes, original)
+                results.append({'exit_code': 0, 'error': '', 'output': ''})
+            return results
+        agent.get_route = get_route
+        agent.resolve_agent_id = lambda selector: 'module/traefik1'
+        agent.tasks = types.SimpleNamespace(runp=runp)
+        spec = importlib.util.spec_from_file_location('cert_routes', ROOT/'imageroot/pypkg/idp_routes.py')
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {'agent':agent, 'idpcert':cert}):
+            spec.loader.exec_module(module)
+        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
+        return module, calls
+
+    def transport(self, module, *args):
+        with patch.object(cert, 'proxy_secret', return_value='a'*64), patch.dict(os.environ,
+                {'MODULE_ID':'idp1','IDP_HOSTNAME':'sso.test','TCP_PORT':'1234'}):
+            module.certificate_transport(*args)
+
+    ORIGINAL = {'idp1': {'instance':'idp1','host':'sso.test','url':'http://127.0.0.1:1234','http2https':True,
+                         'lets_encrypt':True},
+                'idp1-admin': {'instance':'idp1-admin','host':'sso.test','url':'http://127.0.0.1:1234','path':'/admin',
+                               'http2https':True,'lets_encrypt':True,'ip_allowlist':['127.0.0.1/32','::1/128']}}
+
+    def test_stock_traefik_cannot_silently_enable_certificate_login(self):
+        routes = copy.deepcopy(self.ORIGINAL)
+        module, _ = self.route_module(routes, supported=False)
+        with self.assertRaisesRegex(cert.CertificateError, 'traefik_certificate_support_required'):
+            self.transport(module, True)
+        for instance, route in self.ORIGINAL.items():
+            for key, value in route.items():
+                self.assertEqual(routes[instance][key], value)
+            self.assertNotIn(cert.PROOF_HEADER, routes[instance].get('headers', {}).get('request', {}))
+
+    def test_both_routes_are_written_together_and_keep_their_settings(self):
+        routes = copy.deepcopy(self.ORIGINAL)
+        module, calls = self.route_module(routes)
+        self.transport(module, True)
+        self.assertEqual([len(call) for call in calls], [2])
+        self.assertTrue(all(r['client_certificates'] and r['lets_encrypt'] for r in routes.values()))
+        self.assertTrue(all(r['headers']['request'][cert.HEADER] == '' for r in routes.values()))
+        self.assertEqual(routes['idp1-admin']['ip_allowlist'], ['127.0.0.1/32','::1/128'])
+
+    def test_failed_route_write_restores_both_routes(self):
+        for failing in ('idp1', 'idp1-admin'):
+            routes = copy.deepcopy(self.ORIGINAL)
+            module, calls = self.route_module(routes, failing=(failing,))
+            with self.assertRaisesRegex(cert.CertificateError, 'traefik_route_failed'):
+                self.transport(module, True)
+            self.assertEqual({d['instance'] for d in calls[1]}, set(self.ORIGINAL))
+            self.assertFalse(any(r.get('client_certificates') for r in routes.values()))
+
+    def test_unreadable_route_stops_before_losing_lets_encrypt(self):
+        routes = {'idp1-admin': copy.deepcopy(self.ORIGINAL['idp1-admin'])}
+        module, calls = self.route_module(routes)
+        with self.assertRaisesRegex(cert.CertificateError, 'idp_route_missing'):
+            self.transport(module, True)
+        self.assertEqual(calls, [])
+        # configure-module knows the choice from its request.
+        self.transport(module, True, 'sso.test', True)
+        self.assertTrue(routes['idp1']['lets_encrypt'])
+
+    def test_matching_transport_is_not_rewritten(self):
+        routes = copy.deepcopy(self.ORIGINAL)
+        module, calls = self.route_module(routes)
+        self.transport(module, True)
+        self.transport(module, True)
+        self.assertEqual(len(calls), 1)
+        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
+        self.transport(module, True, 'other.test', True)
+        self.assertEqual(len(calls), 2)
+
+    def test_disable_keeps_a_flow_bound_by_an_administrator(self):
+        kc = Mock()
+        kc.get.return_value = {'browserFlow':'site flow', 'attributes':{cert.ENABLED:'true', cert.PROOF_ATTRIBUTE:'a'*64}}
+        cert.set_enabled(kc, 'ad.test', False)
+        self.assertEqual(kc.put.call_args.args[1], {'attributes':{cert.ENABLED:'false'}, 'browserFlow':'site flow'})
+
+    def test_reconcile_skips_a_realm_already_in_place(self):
+        kc = Mock()
+        kc.get.return_value = {'browserFlow':cert.FLOW, 'attributes':{cert.ENABLED:'true', cert.PROOF_ATTRIBUTE:'a'*64}}
+        cert.set_enabled(kc, 'ad.test', True, 'a'*64)
+        kc.put.assert_not_called()

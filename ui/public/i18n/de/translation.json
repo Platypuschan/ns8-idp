@@ -107,7 +107,7 @@
         "cannot_create_task": "Aufgabe {action} kann nicht erstellt werden"
     },
     "certificates": {
-        "confirm_enable": "Zertifikatsanmeldung aktivieren? Sie ersetzt den Passwort-/OTP-Formularzweig. Bei verpflichtender Mehrfaktoranmeldung zuerst den Anmeldeablauf prüfen.",
+        "confirm_enable": "Zertifikatsanmeldung aktivieren? Sie ersetzt den Passwort-/OTP-Formularzweig. Bei verpflichtender Mehrfaktoranmeldung zuerst den Anmeldeablauf prüfen. Die IdP-Adresse ist dabei einige Sekunden nicht erreichbar.",
         "title": "Zertifikate",
         "description": "Optionale Anmeldung ohne Passwort mit einem persönlichen Gerätezertifikat. Nur das öffentliche PEM-Zertifikat registrieren; der private Schlüssel bleibt auf dem Gerät. Benötigt die Clientzertifikats-Erweiterung für NS8-Traefik. Bestehende App-Zugriffsgruppen gelten weiterhin.",
         "no_realms": "Zuerst einen Realm für eine Benutzerdomäne erstellen.",
@@ -133,6 +133,14 @@
         "error_certificate_not_found": "Zertifikat nicht gefunden.",
         "error_custom_browser_flow": "Der angepasste Browser-Anmeldeablauf muss zuerst geprüft werden.",
         "error_traefik_certificate_support_required": "Vor dem Aktivieren die Clientzertifikats-Erweiterung für NS8-Traefik installieren.",
-        "error_realm_not_found": "Realm nicht gefunden."
+        "error_realm_not_found": "Realm nicht gefunden.",
+        "not_operational": "Aktiviert, aber derzeit nicht wirksam: Der Proxy meldet keine Clientzertifikate oder der Anmeldeablauf wurde geändert. Die Anmeldung mit Passwort funktioniert weiterhin.",
+        "revocation_pending": "Widerruf nicht abgeschlossen, Anmeldung gesperrt; Widerruf erneut ausführen",
+        "expired": "abgelaufen",
+        "expires_soon": "läuft bald ab",
+        "error_invalid_proxy_secret": "Der interne Proxy-Nachweis des Moduls ist ungültig.",
+        "error_invalid_operation": "Ungültiger Vorgang.",
+        "error_traefik_route_failed": "Die Proxy-Routen konnten nicht geändert werden; die bisherigen Routen wurden wiederhergestellt.",
+        "error_idp_route_missing": "Die IdP-Route ist nicht lesbar. Modul neu konfigurieren und erneut versuchen."
     }
 }

@@ -43,6 +43,10 @@ possession-based login method, **not an additional second factor**: it bypasses
 the password/form branch, including conditional OTP there. Sites requiring MFA
 must not enable it without a reviewed flow enforcing their second factor.
 Required actions and client token gates still check live LDAP_ONLY groups.
+`prompt=login` and an expired `max_age` skip the certificate and show the password
+form: they ask for a new authentication, and this is also the way to use another
+account on an enrolled device. Successful logins record the certificate fingerprint
+in the event details.
 
 ## Lifecycle and failure behavior
 
@@ -64,12 +68,19 @@ authentication, not all existing SSO/app sessions. Existing SSO cookies run firs
 All mutations use the existing realms lock. Enabling configures/checks transport
 before binding the flow; disabling unbinds the realm before removing unneeded
 transport. Unsupported proxy capability is an error with route rollback.
+Both routes are written by parallel tasks: Traefik drops every router of the
+hostname while their TLS options differ, so enabling or disabling makes the
+hostname briefly unreachable, normally for a few seconds. A failed write restores
+both routes. An unreadable route stops the reconciliation, because it is the only
+record of the Let's Encrypt choice. Startup reconciliation writes nothing when the
+effective state already matches. `get-certificates` reports `operational`, so a
+Traefik update back to the stock module is visible instead of silent.
 Registration and ordinary module configuration preserve other realm attributes.
-Public pins are in the Keycloak database, already in the postgres backup; the
-proof is in persistent module state (existing state backup). Restore/reconfigure
-must recreate both routes with identical TLS options and the same proof. Lost
-proof state requires re-enabling realms to bind the new proof. Do not claim a
-full NS8 backup/restore validation from protocol persistence tests.
+Public pins are in the Keycloak database, already in the postgres backup. The
+proof is a private state file which the module backup does not contain. Startup
+reconciliation creates a new proof and writes it to both routes and every enabled
+realm, so a restore needs no manual step. Do not claim a full NS8 backup/restore
+validation from protocol persistence tests.
 
 ## Sources
 

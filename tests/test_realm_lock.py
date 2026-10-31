@@ -21,6 +21,7 @@ import unittest
 sys.dont_write_bytecode = True
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT/'imageroot/pypkg'))
 UPSTREAM=Path(os.environ.get('IDP_UPSTREAM_ROOT', ROOT))
 
 

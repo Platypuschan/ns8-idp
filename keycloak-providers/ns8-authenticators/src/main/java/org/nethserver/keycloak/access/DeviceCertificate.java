@@ -12,8 +12,11 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.cache.UserCache;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.x509.X509ClientCertificateLookup;
 import org.keycloak.util.JsonSerialization;
+import org.keycloak.util.TokenUtil;
 
 /** Exact certificate pins owned by administrators, never user profile fields.
  * TLS proves key possession at Traefik; its strip/pass middleware prevents
@@ -22,6 +25,16 @@ import org.keycloak.util.JsonSerialization;
 public final class DeviceCertificate implements Authenticator {
     @Override public void authenticate(AuthenticationFlowContext context) {
         if (!"true".equals(context.getRealm().getAttribute("ns8.x509.enabled"))) {
+            context.attempted();
+            return;
+        }
+        // prompt=login and an expired max_age ask the person to authenticate
+        // again, which unattended device possession cannot answer. This also
+        // keeps a way to sign in with another account on an enrolled device.
+        var authSession = context.getAuthenticationSession();
+        if (authSession.getAuthNote(AuthenticationManager.FORCED_REAUTHENTICATION) != null
+                || TokenUtil.hasPrompt(authSession.getClientNote(OIDCLoginProtocol.PROMPT_PARAM),
+                    OIDCLoginProtocol.PROMPT_VALUE_LOGIN)) {
             context.attempted();
             return;
         }
@@ -74,7 +87,7 @@ public final class DeviceCertificate implements Authenticator {
                 throw new IllegalArgumentException("Directory identity unavailable");
             context.setUser(user);
             context.getEvent().detail("auth_method", "ns8-device-certificate");
-            context.getAuthenticationSession().setAuthNote("ns8.x509.fingerprint", fingerprint);
+            context.getEvent().detail("ns8_certificate_sha256", fingerprint);
             context.success();
         } catch (Exception exception) {
             // Invalid certificates/directory failures never become successful
