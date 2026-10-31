@@ -31,6 +31,7 @@ Install the reviewed proxy capability only in the disposable guest
     ${result} =    Run Process    python3    ${CURDIR}/../integrations/ns8-traefik/prepare.py    ${folder}
     Should Be Equal As Integers    ${result.rc}    0    ${result.stderr}
     Put File    ${folder}/imageroot/actions/set-route/20writeconfig    /tmp/ns8-x509-proxy-writeconfig    mode=0644
+    Put File    ${folder}/imageroot/actions/set-route/29waitsync    /tmp/ns8-x509-proxy-waitsync    mode=0644
     Put File    ${folder}/imageroot/pypkg/get_route.py    /tmp/ns8-x509-proxy-getroute    mode=0644
     Put File    ${folder}/imageroot/actions/set-route/validate-input.json    /tmp/ns8-x509-proxy-input    mode=0644
     Put File    ${folder}/imageroot/actions/get-route/validate-output.json    /tmp/ns8-x509-proxy-output    mode=0644

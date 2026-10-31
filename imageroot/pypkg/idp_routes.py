@@ -16,24 +16,21 @@ def restrict_admin(host, lets_encrypt=False):
 
 
 def _write_routes(routes):
-    """Write all routes of the hostname at the same time and report success.
+    """Write all routes of the hostname one after the other, report success.
 
-    Traefik drops every router of a hostname while their TLS options differ.
-    Sequential set-route tasks would keep that window open for the whole
-    29waitsync retry budget, and agent.set_route() exits on errors, which
-    would skip the rollback. The acme checks are off: these routes keep the
-    certificate they have, and configure-module already validated new ones.
+    agent.set_route() would exit on errors and skip the rollback. Parallel
+    tasks are unsafe: set-route truncates its file while another task parses
+    every file in configs/. The patched 29waitsync skips its wait, because
+    Traefik drops the routers of a hostname while their TLS options differ.
+    The acme checks are off: these routes keep the certificate they have, and
+    configure-module already validated new ones.
     """
-    traefik = agent.resolve_agent_id('traefik@node')
-    results = agent.tasks.runp([{
-        'agent_id': traefik, 'action': 'set-route',
-        'data': {**route, 'lets_encrypt_check': False, 'lets_encrypt_cleanup': False},
-    } for route in routes], extra={'isNotificationHidden': True})
     success = True
-    for route, result in zip(routes, results):
-        if isinstance(result, Exception) or result['exit_code'] != 0:
-            error = result if isinstance(result, Exception) else result.get('error')
-            print(f"set-route {route['instance']} failed: {error}", file=sys.stderr)
+    for route in routes:
+        response = agent.set_route({**route, 'lets_encrypt_check': False, 'lets_encrypt_cleanup': False},
+                                   error_passthrough=False)
+        if response['exit_code'] != 0:
+            print(f"set-route {route['instance']} failed: {response.get('error')}", file=sys.stderr)
             success = False
     return success
 
@@ -83,7 +80,7 @@ def certificate_transport(value, host=None, lets_encrypt=None):
             raise idpcert.CertificateError('traefik_route_failed')
         if value:
             # Check the effective capability of both routes together.
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + 20
             while not all(agent.get_route(route['instance']).get('client_certificates') is True
                           for route in routes):
                 if time.monotonic() >= deadline:

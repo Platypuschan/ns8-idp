@@ -6,7 +6,8 @@ request/forwarding through `set-route`. Merely adding a Keycloak authenticator
 cannot enable mTLS on that deployment.
 
 `client-certificates.patch` adds a boolean `client_certificates` to the existing
-route API, its readback schema and implementation. It requests an optional TLS
+route API, its readback schema and implementation, and skips the `29waitsync`
+wait for such writes, which would only prolong the outage between two routes. It requests an optional TLS
 client certificate, removes attacker-controlled certificate headers, then sets
 the PEM header from the TLS connection. `RequestClientCert` proves key possession
 but intentionally does not authorize any issuer: the IdP checks exact certificate
@@ -27,11 +28,11 @@ python3 integrations/ns8-traefik/prepare.py /absolute/path/to/ns8-traefik-checko
 ```
 
 The helper verifies SHA-256 hashes of all affected upstream files before applying
-the patch. Without a full checkout it prepares just the four changed files for
+the patch. Without a full checkout it prepares just the five changed files for
 tests. It never edits an installed NS8 Traefik. Build/test the full checkout using
 the upstream workflow; deploying that proxy change is a separate operation.
 
-IdP enablement writes both routes in parallel tasks and verifies both readbacks
+IdP enablement writes both routes in sequence, without waiting between them, and verifies both readbacks
 acknowledge the capability; an unmodified proxy cannot silently enable the feature. Disablement removes the
 certificate TLS options and forwarding middlewares through the ordinary API.
 Deleting the routes removes their configuration and TLS options with them.

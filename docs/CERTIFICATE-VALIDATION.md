@@ -35,7 +35,7 @@ actual NS8 Traefik runtime 3.7.15. Publication was explicitly disabled.
 
 The standard suite first verifies the unmodified stock proxy refuses certificate
 enablement while ordinary login keeps working. The dedicated companion suite
-then installs the four checksum-verified, patched upstream source files only in
+then installs the five checksum-verified, patched upstream source files only in
 the disposable `ns8-ci` guest and verifies:
 
 - public certificate enrollment for an existing OpenLDAP user, live app group
