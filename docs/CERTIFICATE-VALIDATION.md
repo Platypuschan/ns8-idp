@@ -18,6 +18,14 @@ and `max_age`. Not measured: the duration of the hostname outage while enabling.
 `lets_encrypt=true` stays untested, and the Android evidence below predates these
 changes. The Java change only adds a skip before certificate handling.
 
+Directory account state, user decision 2026-10-31. Evidence at
+44fa456cc8fe8116f584278791d6480a8f002744:
+[candidate 41213934537](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41213934537)
+Debian13 and Rocky9 40 passed / one expected skip each, including lock and unlock
+of an OpenLDAP account. TLS suite 11 of 11 with an expired Samba account and a
+missing mapper. Negative control: with the check removed, the expired account
+signs in, so the test fails.
+
 ## CI on real NS8
 
 [Final candidate 41201701011](https://github.com/Platypuschan/ns8-idp-reworked/actions/runs/41201701011)

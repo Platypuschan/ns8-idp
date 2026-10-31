@@ -1,11 +1,6 @@
-> Unreleased security work branch: Keycloak runtime/providers 26.8.1, LDAP-only
-> membership, sticky required policies, restricted public admin paths and
-> registration validation. See [ADR 0002](docs/decisions/0002-security-decisions.md).
-> Previously published release notes below describe their historical versions.
-
 # ns8-idp-reworked
 
-Veröffentlichte Vorabversion **0.1.0-rc.2**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, und optionaler Tokenlaufzeit; keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
+Vorabversion **0.1.0-rc.5**. Eigenständiges angepasstes Modul mit optionaler Client-Gruppenregel, einstellbar auf der Seite **Zugriff**, optionaler Tokenlaufzeit und optionaler [Anmeldung mit Gerätezertifikat](docs/CERTIFICATES.md); keine externen Identitätsanbieter; kein Stable-/Katalogrelease.
 
 [Prüfnachweise und Image-Digests](docs/RELEASE-0.1.0-rc.2.md) ([0.1.0-rc.1](docs/RELEASE-0.1.0-rc.1.md)) · [Release-Ablauf](docs/PRERELEASE.md) · [Gitea-SSO-Prüfung](docs/GITEA-SSO.md)
 
