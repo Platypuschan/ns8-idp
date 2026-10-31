@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": [
+    "enabled",
+    "certificates"
+  ],
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "certificates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "fingerprint",
+          "user_id",
+          "ldap_id",
+          "username",
+          "label",
+          "not_after"
+        ]
+      }
+    }
+  }
+}

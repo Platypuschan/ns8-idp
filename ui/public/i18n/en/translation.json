@@ -85,6 +85,8 @@
         "cannot_create_task": "Cannot create task {action}"
     },
     "action": {
+        "alter-certificates": "Manage certificates",
+        "get-certificates": "Read certificates",
         "get-status": "Get status",
         "get-configuration": "Get configuration",
         "configure-module": "Configure module",
@@ -109,5 +111,34 @@
         "404": "Resource not found",
         "cannot_retrieve_module_info": "Cannot retrieve module info",
         "cannot_retrieve_installed_modules": "Cannot retrieve installed modules"
+    },
+    "certificates": {
+        "confirm_enable": "Enable certificate sign-in? It replaces the password/OTP form branch. Review the flow first if multi-factor authentication is required.",
+        "title": "Certificates",
+        "description": "Optional passwordless sign-in using a personal device certificate. Enroll only the public PEM certificate; keep its private key on the device. Requires the NS8 Traefik client-certificate extension. Existing application access groups still apply.",
+        "no_realms": "Create a user domain realm first.",
+        "enabled": "Certificate sign-in enabled",
+        "disabled": "Certificate sign-in disabled",
+        "enable": "Enable certificate sign-in",
+        "disable": "Disable certificate sign-in",
+        "revoke_notice": "Revoking a certificate also signs this user out of all IdP sessions. Existing application sessions and offline data have their own lifetime.",
+        "expires": "Expires:",
+        "revoke": "Revoke",
+        "username": "Domain username",
+        "label": "Device name",
+        "public_certificate": "Public client certificate (.crt or .pem)",
+        "enroll": "Enroll certificate",
+        "confirm_revoke": "Revoke {label} and end all IdP sessions of this user?",
+        "error_invalid_certificate": "Select one public PEM certificate without a private key.",
+        "error_invalid_client_certificate": "A valid client authentication certificate is required.",
+        "error_certificate_not_current": "Certificate expired or not yet valid.",
+        "error_domain_user_not_found": "Enabled domain user not found.",
+        "error_ldap_identity_missing": "The LDAP identity could not be verified.",
+        "error_certificate_already_registered": "Certificate already enrolled.",
+        "error_certificate_limit": "Maximum of 128 certificates per realm reached.",
+        "error_certificate_not_found": "Certificate not found.",
+        "error_custom_browser_flow": "The custom browser authentication flow must be reviewed first.",
+        "error_traefik_certificate_support_required": "Install the NS8 Traefik client-certificate extension before enabling this feature.",
+        "error_realm_not_found": "Realm not found."
     }
 }

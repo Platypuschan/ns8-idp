@@ -401,6 +401,12 @@ before it existed.
 
 ## Running tests locally
 
+Optional personal device certificate sign-in is documented in
+[CERTIFICATES.md](docs/CERTIFICATES.md). It includes an administrator-only
+enrollment/revocation page and requires the accompanying NS8 Traefik route API
+extension; the stock proxy cannot enable the feature. The existing password
+login and live LDAP group access policy remain available.
+
 This module uses the NS8 standard testing infrastructure. For instructions on how to run the test suite locally, refer to the [Running tests locally](https://github.com/NethServer/ns8-github-actions/blob/v1/README.md#running-tests-locally) section of the ns8-github-actions README.
 
 The `Realms` suite creates an OpenLDAP user domain, and simulates an

@@ -142,8 +142,9 @@ class LoginTests(unittest.TestCase):
         cmd('podman', 'run', '-d', '--name', cls.keycloak, '--network', cls.network,
             '-p', f'127.0.0.1:{cls.kc_port}:8080', '--env', 'KC_BOOTSTRAP_ADMIN_USERNAME',
             '--env', 'KC_BOOTSTRAP_ADMIN_PASSWORD', os.environ.get('IDP_RUNTIME_IMAGE', 'localhost/ns8-idp-client-access-test'),
-            'start-dev', '--db=dev-file', '--features=scripts', '--log-level=INFO,org.nethserver.keycloak.access:DEBUG', '--hostname=' + cls.url,
+            'start-dev', '--db=dev-file', '--features=scripts', '--log-level=INFO,org.nethserver.keycloak.access:DEBUG', '--hostname=' + getattr(cls, 'frontend_url', cls.url),
             '--spi-theme--welcome-theme=ns8',
+            *getattr(cls, 'keycloak_args', []),
             env=env)
         cls.names.append(cls.keycloak)
         wait_http(cls.url + '/realms/master/.well-known/openid-configuration', cls.names)

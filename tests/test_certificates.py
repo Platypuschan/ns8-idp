@@ -1,0 +1,122 @@
+"""Credential input, immutable identity and transport capability boundaries."""
+import copy
+import importlib.util
+import json
+import os
+from pathlib import Path
+import ssl
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest.mock import patch
+import jsonschema
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('cert_module', ROOT / 'imageroot/pypkg/idpcert.py')
+cert = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cert)
+
+
+class FakeKC:
+    def __init__(self):
+        self.rep = {'attributes': {'unrelated': 'keep'}, 'browserFlow': 'browser'}
+        self.user = {'id': 'fixed-id', 'username': 'alice', 'enabled': True,
+                     'federationLink': 'ldap', 'attributes': {'LDAP_ID': ['fixed-object-guid']}}
+        self.fail_logout = False
+    def get(self, path, params=None):
+        if path.endswith('/users'): return [copy.deepcopy(self.user)]
+        if '/users/' in path: return copy.deepcopy(self.user)
+        return copy.deepcopy(self.rep)
+    def put(self, path, data): self.rep.update(copy.deepcopy(data))
+    def post(self, path, data=None):
+        if self.fail_logout: raise RuntimeError('directory unavailable')
+
+
+class CertificateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        folder = Path(cls.temp.name)
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+            '-keyout', str(folder/'device.key'), '-out', str(folder/'device.crt'),
+            '-days', '2', '-subj', '/CN=device', '-addext', 'basicConstraints=critical,CA:FALSE',
+            '-addext', 'extendedKeyUsage=clientAuth', '-addext', 'keyUsage=critical,digitalSignature'],
+            check=True, capture_output=True)
+        cls.pem = (folder/'device.crt').read_text()
+        cls.private = (folder/'device.key').read_text()
+    @classmethod
+    def tearDownClass(cls): cls.temp.cleanup()
+
+    def test_public_certificate_binds_both_immutable_identifiers(self):
+        kc = FakeKC()
+        record = cert.enroll(kc, 'ad.test', 'alice', 'tablet', self.pem)
+        self.assertEqual(record['user_id'], 'fixed-id')
+        self.assertEqual(record['ldap_id'], 'fixed-object-guid')
+        self.assertEqual(len(record['fingerprint']), 64)
+        self.assertEqual(kc.rep['attributes']['unrelated'], 'keep')
+        self.assertNotIn('PRIVATE', json.dumps(kc.rep))
+        with self.assertRaisesRegex(cert.CertificateError, 'already_registered'):
+            cert.enroll(kc, 'ad.test', 'alice', 'other owner', self.pem)
+
+    def test_bundles_private_keys_and_server_certificates_rejected(self):
+        for value in (self.private, self.pem + self.private, self.pem + self.pem, 'not a certificate'):
+            with self.subTest(value=value[:30]), self.assertRaises(cert.CertificateError): cert.inspect(value)
+        # Syntactically encoded garbage must not become a credential.
+        with self.assertRaises(cert.CertificateError): cert.inspect('-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----')
+
+    def test_local_disabled_and_unbound_accounts_cannot_enroll(self):
+        for field, value in [('federationLink', None), ('enabled', False), ('attributes', {})]:
+            kc = FakeKC()
+            kc.user[field] = value
+            with self.subTest(field=field), self.assertRaises(cert.CertificateError):
+                cert.enroll(kc, 'ad.test', 'alice', 'tablet', self.pem)
+            self.assertEqual(kc.rep['attributes'], {'unrelated': 'keep'})
+
+    def test_revoke_failure_stays_denied_and_can_be_retried(self):
+        kc = FakeKC()
+        record = cert.enroll(kc, 'ad.test', 'alice', 'tablet', self.pem)
+        kc.fail_logout = True
+        with self.assertRaises(RuntimeError): cert.revoke(kc, 'ad.test', record['fingerprint'])
+        self.assertTrue(cert.records(kc.rep)[record['fingerprint']]['revoked'])
+        kc.fail_logout = False
+        cert.revoke(kc, 'ad.test', record['fingerprint'])
+        self.assertFalse(cert.records(kc.rep))
+        self.assertEqual(kc.rep['attributes'], {'unrelated': 'keep'})
+
+    def test_actions_reject_incomplete_operations_and_bad_fingerprints(self):
+        schema = json.loads((ROOT/'imageroot/actions/alter-certificates/validate-input.json').read_text())
+        for request in ({'domain':'ad.test','operation':'enroll'},
+                        {'domain':'ad.test','operation':'revoke','fingerprint':'../x'},
+                        {'domain':'ad.test','operation':'surprise'}):
+            with self.assertRaises(jsonschema.ValidationError): jsonschema.validate(request, schema)
+        jsonschema.validate({'domain':'ad.test','operation':'enable'}, schema)
+
+    def test_stock_traefik_cannot_silently_enable_certificate_login(self):
+        original = {'idp1': {'instance':'idp1','host':'sso.test','url':'http://127.0.0.1:1234','http2https':True},
+                    'idp1-admin': {'instance':'idp1-admin','host':'sso.test','url':'http://127.0.0.1:1234','path':'/admin'}}
+        for supported in (False, True):
+            routes = copy.deepcopy(original)
+            agent = types.ModuleType('agent')
+            agent.get_route = lambda instance: copy.deepcopy(routes.get(instance, {}))
+            def set_route(data):
+                routes[data['instance']].update(copy.deepcopy(data))
+                if not supported: routes[data['instance']].pop('client_certificates', None)
+                if not routes[data['instance']].get('headers'):
+                    routes[data['instance']].pop('headers', None)
+            agent.set_route = set_route
+            spec = importlib.util.spec_from_file_location('cert_routes', ROOT/'imageroot/pypkg/idp_routes.py')
+            module = importlib.util.module_from_spec(spec)
+            with patch.object(cert, 'proxy_secret', return_value='a'*64), patch.dict(sys.modules, {'agent':agent, 'idpcert':cert}), patch.dict(os.environ,
+                    {'MODULE_ID':'idp1','IDP_HOSTNAME':'sso.test','TCP_PORT':'1234'}):
+                spec.loader.exec_module(module)
+                if supported:
+                    module.certificate_transport(True)
+                    self.assertTrue(all(r['client_certificates'] for r in routes.values()))
+                    self.assertTrue(all(r['headers']['request'][cert.HEADER] == '' for r in routes.values()))
+                    self.assertEqual(routes['idp1-admin']['ip_allowlist'], ['127.0.0.1/32','::1/128'])
+                else:
+                    with self.assertRaisesRegex(cert.CertificateError, 'traefik_certificate_support_required'):
+                        module.certificate_transport(True)
+                    self.assertEqual(routes, original)

@@ -24,6 +24,7 @@ import sys
 import agent
 import agent.ldapproxy
 import idpaccess
+import idpcert
 import idplegacy
 import idprealm
 import kcadmin
@@ -61,6 +62,7 @@ with idprealm.realms_lock():
     user_domains = agent.ldapproxy.Ldapproxy().get_domains_list()
 
     kc = kcadmin.agent_client()
+    certificate_realms = []
     for realm in kcadmin.managed_realms(kc):
         if realm in user_domains:
             try:
@@ -86,3 +88,13 @@ with idprealm.realms_lock():
 
         print(f"Applying SMTP settings to realm {realm}", file=sys.stderr)
         kc.put(f"/{realm}", {"smtpServer": smtp_server})
+        if idpcert.enabled(kc.get('/' + idpcert.path(realm))):
+            certificate_realms.append(realm)
+
+    if certificate_realms:
+        from idp_routes import certificate_transport
+        # Repair routes after restore/update and rebind a flow which a legacy
+        # cleanup may have reset. Missing proxy capability fails this reconcile.
+        certificate_transport(True)
+        for realm in certificate_realms:
+            idpcert.set_enabled(kc, realm, True, idpcert.proxy_secret())

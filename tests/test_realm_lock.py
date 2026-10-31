@@ -41,7 +41,7 @@ def action_worker(script, lockfile, pipe):
     ldap.Ldapproxy=lambda:types.SimpleNamespace(get_domains_list=lambda:['ad.test'])
     kcadmin=types.ModuleType('kcadmin')
     client={'id':'client','clientId':'review1','attributes':{'ns8.module_id':'review1'}}
-    kc=types.SimpleNamespace(put=lambda *a:None)
+    kc=types.SimpleNamespace(put=lambda *a:None, get=lambda *a:{'attributes':{}})
     def connect():
         pipe.send('keycloak-access')
         return kc

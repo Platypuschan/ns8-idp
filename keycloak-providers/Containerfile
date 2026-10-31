@@ -23,6 +23,7 @@ RUN --mount=type=cache,target=/root/.m2 \
 # providers. Runtime options are passed by the systemd units.
 FROM quay.io/keycloak/keycloak:26.8.1-0 AS builder
 ENV KC_DB=postgres \
+    KC_SPI_X509CERT_LOOKUP__PROVIDER=traefik \
     KC_FEATURES=scripts \
     KC_HEALTH_ENABLED=true \
     KC_CACHE=local
