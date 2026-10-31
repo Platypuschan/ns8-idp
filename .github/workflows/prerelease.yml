@@ -9,7 +9,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: prerelease
+  # Publication stays serialized; isolated SHA-tagged test candidates may run
+  # concurrently without overwriting each other's images or release tags.
+  group: ${{ inputs.publish && 'prerelease' || format('prerelease-test-{0}', github.sha) }}
   cancel-in-progress: false
 jobs:
   build:
