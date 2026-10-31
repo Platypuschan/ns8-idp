@@ -451,6 +451,42 @@ class LoginTests(unittest.TestCase):
         self.assertIn('code=',target or '')
 
 
+    def saml_client(self, name, group_client='vaultwarden1'):
+        """A SAML client, created as with the Keycloak console, with the
+        policy attributes of another client copied: the module API sets
+        policies on its OIDC clients only."""
+        acs=self.vw_url+'/saml/acs'
+        policy={k:v for k,v in self.kc.find_client('ad.test',group_client)['attributes'].items() if k.startswith('ns8.access')}
+        self.kc.post('/ad.test/clients',{'clientId':name,'protocol':'saml','enabled':True,
+            'redirectUris':[acs],'frontchannelLogout':False,'attributes':dict(policy,**{
+                'saml.client.signature':'false','saml.force.post.binding':'true',
+                'saml_assertion_consumer_url_post':acs,'saml_idp_initiated_sso_url_name':name})})
+        client=self.kc.find_client('ad.test',name)
+        self.addCleanup(lambda:self.kc.delete('/ad.test/clients/'+client['id']))
+        return client,acs
+
+    def saml_login(self, username, url, session=None, require_cookie=False):
+        """Follow a SAML login. Return (last response, SAMLResponse or None)."""
+        s=session or requests.Session()
+        r=s.get(url,allow_redirects=False,timeout=20)
+        for _ in range(20):
+            for cookie in s.cookies:
+                if cookie.domain == '127.0.0.1': cookie.secure = False
+            if r.is_redirect:
+                r=s.get(urljoin(r.url,r.headers['Location']),allow_redirects=False,timeout=20)
+                continue
+            page=Form(r.text)
+            for form in page.forms.values():
+                if 'SAMLResponse' in form['inputs']:
+                    return r,form['inputs']['SAMLResponse']
+            if page.action:
+                if require_cookie:
+                    self.fail('Expected reuse of the existing SSO cookie')
+                r=s.post(page.action,data={'username':username,'password':self.password},allow_redirects=False,timeout=20)
+                continue
+            return r,None
+        self.fail('Redirect loop')
+
     def test_31_saml_logins_run_the_required_action(self):
         """Hypothesis: the required action does not depend on the protocol,
         so it also restricts SAML logins, SP- and IdP-initiated, with and
