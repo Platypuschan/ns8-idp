@@ -73,7 +73,7 @@ export default {
       if (!file) return;
       if (file.size > 16384) { this.message = this.$t("certificates.error_invalid_certificate"); return; }
       const text = await file.text();
-      if (!/^\s*-----BEGIN CERTIFICATE-----[\s\S]*-----END CERTIFICATE-----\s*$/.test(text)) {
+      if (!/^\s*-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*$/.test(text)) {
         this.message = this.$t("certificates.error_invalid_certificate"); return;
       }
       this.forms[realm.name].certificate = text;
