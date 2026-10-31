@@ -79,12 +79,15 @@ authentication, not all existing SSO/app sessions. Existing SSO cookies run firs
 All mutations use the existing realms lock. Enabling configures/checks transport
 before binding the flow; disabling unbinds the realm before removing unneeded
 transport. Unsupported proxy capability is an error with route rollback.
-Both routes are written by parallel tasks: Traefik drops every router of the
-hostname while their TLS options differ, so enabling or disabling makes the
-hostname briefly unreachable, normally for a few seconds. A failed write restores
-both routes. An unreadable route stops the reconciliation, because it is the only
-record of the Let's Encrypt choice. Startup reconciliation writes nothing when the
-effective state already matches. `get-certificates` reports `operational`, so a
+Both routes are written one after the other: parallel set-route tasks crash,
+because one truncates its file while another parses every file in `configs/`.
+Traefik drops all routers of the hostname while their TLS options differ, so
+enabling or disabling makes the hostname briefly unreachable. The patched
+`29waitsync` skips its wait for these writes to keep that window short. A failed
+write restores both routes. An unreadable route stops the reconciliation, because
+it is the only record of the Let's Encrypt choice. Startup reconciliation writes
+nothing when the effective state already matches.
+`get-certificates` reports `operational`, so a
 Traefik update back to the stock module is visible instead of silent.
 Registration and ordinary module configuration preserve other realm attributes.
 Public pins are in the Keycloak database, already in the postgres backup. The

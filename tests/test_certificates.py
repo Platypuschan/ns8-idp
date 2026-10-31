@@ -128,7 +128,7 @@ class CertificateTests(unittest.TestCase):
         jsonschema.validate({'domain':'ad.test','operation':'enable'}, schema)
 
     def route_module(self, routes, supported=True, failing=()):
-        """idp_routes with a fake proxy. agent.set_route is absent: it exits."""
+        """idp_routes with a fake proxy."""
         agent = types.ModuleType('agent')
         calls = []
         def get_route(instance):
@@ -136,29 +136,25 @@ class CertificateTests(unittest.TestCase):
             if result and supported and not all(r.get('client_certificates') for r in routes.values()):
                 result['client_certificates'] = False
             return result
-        def runp(tasks, **kwargs):
-            calls.append([t['data'] for t in tasks])
-            results = []
-            for task in tasks:
-                data = copy.deepcopy(task['data'])
-                self.assertFalse(data['lets_encrypt_check'] or data['lets_encrypt_cleanup'])
-                if data['instance'] in failing and len(calls) == 1:
-                    results.append({'exit_code': 3, 'error': 'failed', 'output': ''})
-                    continue
-                routes.setdefault(data['instance'], {}).update(data)
-                if not supported: routes[data['instance']].pop('client_certificates', None)
-                if not routes[data['instance']].get('headers'):
-                    routes[data['instance']].pop('headers', None)
-                results.append({'exit_code': 0, 'error': '', 'output': ''})
-            return results
+        def set_route(data, error_passthrough=True):
+            self.assertFalse(error_passthrough, 'set_route exits on errors, skipping the rollback')
+            self.assertFalse(data['lets_encrypt_check'] or data['lets_encrypt_cleanup'])
+            data = copy.deepcopy(data)
+            calls.append(data)
+            if data['instance'] in failing and len(calls) <= 2:
+                return {'exit_code': 3, 'error': 'failed', 'output': ''}
+            routes.setdefault(data['instance'], {}).update(data)
+            if not supported: routes[data['instance']].pop('client_certificates', None)
+            if not routes[data['instance']].get('headers'):
+                routes[data['instance']].pop('headers', None)
+            return {'exit_code': 0, 'error': '', 'output': ''}
         agent.get_route = get_route
-        agent.resolve_agent_id = lambda selector: 'module/traefik1'
-        agent.tasks = types.SimpleNamespace(runp=runp)
+        agent.set_route = set_route
         spec = importlib.util.spec_from_file_location('cert_routes', ROOT/'imageroot/pypkg/idp_routes.py')
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {'agent':agent, 'idpcert':cert}):
             spec.loader.exec_module(module)
-        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
+        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 21]), sleep=lambda _:None)
         return module, calls
 
     def transport(self, module, *args):
@@ -185,7 +181,7 @@ class CertificateTests(unittest.TestCase):
         routes = copy.deepcopy(self.ORIGINAL)
         module, calls = self.route_module(routes)
         self.transport(module, True)
-        self.assertEqual([len(call) for call in calls], [2])
+        self.assertEqual([call['instance'] for call in calls], ['idp1', 'idp1-admin'])
         self.assertTrue(all(r['client_certificates'] and r['lets_encrypt'] for r in routes.values()))
         self.assertTrue(all(r['headers']['request'][cert.HEADER] == '' for r in routes.values()))
         self.assertEqual(routes['idp1-admin']['ip_allowlist'], ['127.0.0.1/32','::1/128'])
@@ -196,7 +192,7 @@ class CertificateTests(unittest.TestCase):
             module, calls = self.route_module(routes, failing=(failing,))
             with self.assertRaisesRegex(cert.CertificateError, 'traefik_route_failed'):
                 self.transport(module, True)
-            self.assertEqual({d['instance'] for d in calls[1]}, set(self.ORIGINAL))
+            self.assertEqual({d['instance'] for d in calls[2:]}, set(self.ORIGINAL))
             self.assertFalse(any(r.get('client_certificates') for r in routes.values()))
 
     def test_unreadable_route_stops_before_losing_lets_encrypt(self):
@@ -214,10 +210,10 @@ class CertificateTests(unittest.TestCase):
         module, calls = self.route_module(routes)
         self.transport(module, True)
         self.transport(module, True)
-        self.assertEqual(len(calls), 1)
-        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 11]), sleep=lambda _:None)
-        self.transport(module, True, 'other.test', True)
         self.assertEqual(len(calls), 2)
+        module.time = types.SimpleNamespace(monotonic=Mock(side_effect=[0, 21]), sleep=lambda _:None)
+        self.transport(module, True, 'other.test', True)
+        self.assertEqual(len(calls), 4)
 
     def test_account_state_is_read_live_for_each_directory_schema(self):
         for active_directory, attribute in ((True, 'accountExpires'), (False, 'pwdAccountLockedTime')):
