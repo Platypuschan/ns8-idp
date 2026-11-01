@@ -78,6 +78,16 @@ Restart and reconfiguration preserve certificate login
     &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
     Should Be True    ${state.operational}
 
+The admin restriction can change while certificate login is active
+    Run task    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false, "restrict_admin_console": false}    decode_json=${FALSE}
+    Retry test    Certificate authorization    certificate    ${TRUE}
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Be True    ${state.operational}
+    Run task    module/${module_id}/configure-module    {"host": "${IDP_HOST}", "lets_encrypt": false, "restrict_admin_console": true}    decode_json=${FALSE}
+    Retry test    Certificate authorization    certificate    ${TRUE}
+    &{state} =    Run task    module/${module_id}/get-certificates    {"domain": "${USER_DOMAIN}"}
+    Should Be True    ${state.operational}
+
 Revoke and disable certificate login
     Run task    module/${module_id}/alter-certificates    {"domain": "${USER_DOMAIN}", "operation": "revoke", "fingerprint": "${DEVICE_FINGERPRINT}"}    decode_json=${FALSE}
     Certificate authorization    certificate    ${FALSE}
